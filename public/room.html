@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Durak Room</title>
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #2e7d32;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+            text-align: center;
+            width: 100%;
+            max-width: 600px;
+        }
+        h1 {
+            margin: 0 0 20px;
+            color: #d32f2f;
+        }
+        .room-info {
+            margin-bottom: 20px;
+        }
+        .room-info span {
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        ul {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 20px;
+            text-align: left;
+        }
+        ul li {
+            padding: 5px 0;
+            font-size: 16px;
+        }
+        button {
+            display: inline-block;
+            margin: 10px 5px;
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            color: white;
+        }
+        #readyBtn {
+            background-color: #4CAF50;
+        }
+        #readyBtn:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #leaveRoomBtn {
+            background-color: #d32f2f;
+        }
+        button:hover:not(:disabled) {
+            opacity: 0.9;
+        }
+        #errorMessage {
+            color: #d32f2f;
+            margin-top: 10px;
+            min-height: 20px;
+        }
+        .chat-box {
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            height: 150px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            padding: 10px;
+            background: #f9f9f9;
+            text-align: left;
+        }
+        #chatInput {
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        @media (max-width: 480px) {
+            .container {
+                width: 90%;
+                padding: 15px;
+            }
+            h1 {
+                font-size: 1.5em;
+            }
+            button, #chatInput {
+                font-size: 14px;
+                padding: 8px;
+            }
+            .chat-box {
+                height: 100px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 id="title">Durak Room</h1>
+        <div class="room-info">
+            <p id="roomCodeLabel">Room Code: <span id="roomCode"></span></p>
+            <p id="playerCountLabel">Players: <span id="playerCount">0/0</span></p>
+        </div>
+        <ul id="playerList"></ul>
+        <button id="readyBtn">Ready</button>
+        <button id="leaveRoomBtn">Exit Room</button>
+        <div class="chat-box" id="chatBox"></div>
+        <input type="text" id="chatInput" placeholder="Type a message...">
+        <div id="errorMessage"></div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        console.log('room.html: Script started');
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('room.html: DOM fully loaded');
+
+            const socket = io({
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 2000
+            });
+            const roomCodeSpan = document.getElementById('roomCode');
+            const playerList = document.getElementById('playerList');
+            const playerCount = document.getElementById('playerCount');
+            const readyBtn = document.getElementById('readyBtn');
+            const leaveRoomBtn = document.getElementById('leaveRoomBtn');
+            const errorMessage = document.getElementById('errorMessage');
+            const chatBox = document.getElementById('chatBox');
+            const chatInput = document.getElementById('chatInput');
+
+            if (!readyBtn || !leaveRoomBtn) {
+                console.error('room.html: Required buttons not found');
+                errorMessage.textContent = 'Required buttons not found.';
+                return;
+            }
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomId = urlParams.get('room');
+            let playerId = localStorage.getItem('playerId');
+            let playerName = localStorage.getItem('playerName');
+            let language = localStorage.getItem('language') || 'en';
+            let isJoined = localStorage.getItem('isJoined') === 'true';
+
+            console.log('room.html: Initial data:', { roomId, playerId, playerName, language, isJoined });
+            console.log('room.html: localStorage contents:', {
+                playerId: localStorage.getItem('playerId'),
+                playerName: localStorage.getItem('playerName'),
+                language: localStorage.getItem('language'),
+                isJoined: localStorage.getItem('isJoined')
+            });
+
+            if (!roomId || !playerName || !playerId || playerName === 'undefined') {
+                console.error('room.html: Missing or invalid required data', { roomId, playerName, playerId });
+                errorMessage.textContent = 'Invalid room or player data. Redirecting to lobby...';
+                localStorage.clear();
+                setTimeout(() => window.location.href = '/', 5000);
+                return;
+            }
+
+            let joinAttemptCount = 0;
+            const maxJoinAttempts = 5;
+
+            roomCodeSpan.textContent = roomId;
+
+            const translations = {
+                en: {
+                    title: 'Durak Room',
+                    roomCodeLabel: 'Room Code:',
+                    playerCountLabel: 'Players:',
+                    readyBtn: 'Ready',
+                    readyWaiting: 'Ready (Waiting)',
+                    leaveRoomBtn: 'Exit Room',
+                    chatPlaceholder: 'Type a message...',
+                    disconnected: 'disconnected'
+                },
+                uk: {
+                    title: 'Кімната Дурак',
+                    roomCodeLabel: 'Код кімнати:',
+                    playerCountLabel: 'Гравці:',
+                    readyBtn: 'Готовий',
+                    readyWaiting: 'Готовий (Очікування)',
+                    leaveRoomBtn: 'Вийти з кімнати',
+                    chatPlaceholder: 'Введіть повідомлення...',
+                    disconnected: 'відключений'
+                },
+                ru: {
+                    title: 'Комната Дурак',
+                    roomCodeLabel: 'Код комнаты:',
+                    playerCountLabel: 'Игроки:',
+                    readyBtn: 'Готов',
+                    readyWaiting: 'Готов (Ожидание)',
+                    leaveRoomBtn: 'Выйти из комнаты',
+                    chatPlaceholder: 'Введите сообщение...',
+                    disconnected: 'отключен'
+                }
+            };
+
+            function t(key) {
+                return translations[language][key] || translations.en[key] || key;
+            }
+
+            function updateUIText() {
+                document.getElementById('title').textContent = t('title');
+                document.getElementById('roomCodeLabel').childNodes[0].textContent = t('roomCodeLabel') + ' ';
+                document.getElementById('playerCountLabel').childNodes[0].textContent = t('playerCountLabel') + ' ';
+                readyBtn.textContent = readyBtn.disabled ? t('readyWaiting') : t('readyBtn');
+                leaveRoomBtn.textContent = t('leaveRoomBtn');
+                chatInput.placeholder = t('chatPlaceholder');
+            }
+
+            updateUIText();
+
+            function showError(msg) {
+                errorMessage.textContent = msg;
+                setTimeout(() => errorMessage.textContent = '', 5000);
+            }
+
+            function debounce(func, wait) {
+                let timeout;
+                return function(...args) {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(() => func.apply(this, args), wait);
+                };
+            }
+
+            const attemptJoinRoom = debounce(() => {
+                if (isJoined) {
+                    console.log('room.html: Already joined, skipping attemptJoinRoom');
+                    return;
+                }
+                if (joinAttemptCount >= maxJoinAttempts) {
+                    showError('Too many join attempts. Redirecting to lobby.');
+                    localStorage.clear();
+                    setTimeout(() => window.location.href = '/', 2000);
+                    return;
+                }
+                if (!playerName || playerName === 'undefined') {
+                    console.error('room.html: Player name is invalid, redirecting to lobby');
+                    showError('Player not found.');
+                    localStorage.clear();
+                    setTimeout(() => window.location.href = '/', 2000);
+                    return;
+                }
+                joinAttemptCount++;
+                console.log('room.html: Attempting to join room:', { roomId, playerName, playerId, attempt: joinAttemptCount });
+                socket.emit('joinRoom', { roomId, playerName, playerId, language });
+                socket.emit('requestPlayerUpdate', roomId);
+            }, 1000);
+
+            function fetchRoomState() {
+                console.log('room.html: Fetching room state for:', roomId);
+                fetch(`/room/${roomId}`)
+                    .then(response => {
+                        if (!response.ok) throw new Error('Room fetch failed');
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('room.html: HTTP fetch received:', data);
+                        if (data.error) {
+                            showError(data.error === 'Room not found' ? 'Room not found.' : 'An error occurred.');
+                            if (isJoined && data.error === 'Room not found') {
+                                setTimeout(fetchRoomState, 2000);
+                            } else {
+                                setTimeout(() => {
+                                    localStorage.clear();
+                                    window.location.href = '/';
+                                }, 5000);
+                            }
+                            return;
+                        }
+                        playerList.innerHTML = data.players && data.players.length ? data.players.map(player => 
+                            `<li>${player.name}${player.isDisconnected ? ` (${t('disconnected')})` : ''}</li>`
+                        ).join('') : '<li>No players</li>';
+                        playerCount.textContent = `${data.readyCount || 0}/${data.totalCount || 0}`;
+                        const currentPlayer = data.players && data.players.find(p => p.name === playerName);
+                        console.log('room.html: Current player check:', { playerName, currentPlayer });
+                        if (currentPlayer) {
+                            updateReadyButton(currentPlayer.ready, currentPlayer.isDisconnected);
+                            restrictReadyButtonUpdate(currentPlayer.ready, currentPlayer.isDisconnected, currentPlayer.playerId);
+                            logReadyButtonState(currentPlayer.ready, currentPlayer.isDisconnected, currentPlayer.playerId);
+                            isJoined = true;
+                            localStorage.setItem('isJoined', 'true');
+                        } else {
+                            updateReadyButton(false, true);
+                            restrictReadyButtonUpdate(false, true, null);
+                            logReadyButtonState(false, true, null);
+                            showError('Player not found in room.');
+                        }
+                        if (data.trump) {
+                            console.log('room.html: Game started, redirecting to game.html');
+                            window.location.href = `/game?room=${roomId}`;
+                        }
+                    })
+                    .catch(err => {
+                        console.error('room.html: Fetch error:', err);
+                        showError('Failed to fetch room state.');
+                    });
+            }
+
+            readyBtn.addEventListener('click', () => {
+                console.log('room.html: Ready button clicked', { roomId, playerId });
+                socket.emit('ready', { roomId, playerId });
+                readyBtn.disabled = true;
+                readyBtn.textContent = t('readyWaiting');
+                logReadyButtonState(true, false, playerId);
+            });
+
+            leaveRoomBtn.addEventListener('click', () => {
+                console.log('room.html: Leave room clicked', { roomId, playerId, playerName });
+                socket.emit('leaveRoom', { roomId, playerId, playerName });
+                localStorage.clear();
+                window.location.href = '/';
+            });
+
+            chatInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && chatInput.value.trim()) {
+                    const message = chatInput.value.trim();
+                    console.log('room.html: Sending chat message:', message);
+                    socket.emit('chatMessage', { roomId, playerName, message });
+                    chatInput.value = '';
+                }
+            });
+
+            function generateUUID() {
+                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+                    return v.toString(16);
+                });
+            }
+
+            socket.on('connect', () => {
+                console.log('room.html: Socket connected:', socket.id);
+                joinAttemptCount = 0;
+                socket.emit('reconnectPlayer', { roomId, playerId, playerName });
+                if (!isJoined) attemptJoinRoom();
+                fetchRoomState();
+                readyBtn.disabled = false;
+                errorMessage.textContent = '';
+            });
+
+            socket.on('connect_error', (err) => {
+                console.error('room.html: Socket connection error:', err.message);
+                showError('Failed to connect to server. Please check if the server is running.');
+                readyBtn.disabled = true;
+            });
+
+            socket.on('disconnect', () => {
+                console.log('room.html: Socket disconnected');
+                showError('Disconnected from server.');
+                readyBtn.disabled = true;
+            });
+
+            socket.on('updateRoom', ({ players, readyCount, totalCount }) => {
+                console.log('room.html: Received updateRoom:', { players, readyCount, totalCount });
+                playerList.innerHTML = players && players.length ? players.map(player => 
+                    `<li>${player.name}${player.isDisconnected ? ` (${t('disconnected')})` : ''}</li>`
+                ).join('') : '<li>No players</li>';
+                playerCount.textContent = `${readyCount || 0}/${totalCount || 0}`;
+                // Removed button update to prevent affecting all players
+            });
+
+            socket.on('startGame', ({ trump, trumpCard, currentAttacker, currentDefender }) => {
+                console.log('room.html: Received startGame:', { trump, trumpCard, currentAttacker, currentDefender });
+                window.location.href = `/game?room=${roomId}`;
+            });
+
+            socket.on('errorMessage', msg => {
+                console.log('room.html: Error:', msg);
+                showError(msg === 'Room does not exist.' ? 'Room not found.' : 
+                          msg === 'Player not found.' ? 'Player not found.' : 
+                          msg === 'Room is full.' ? 'Room is full.' : 'An error occurred.');
+                if (msg === 'Room does not exist.' || msg === 'Player not found.') {
+                    localStorage.clear();
+                    setTimeout(() => window.location.href = '/', 2000);
+                }
+            });
+
+            socket.on('setPlayerId', (newPlayerId) => {
+                console.log('room.html: Received setPlayerId:', newPlayerId);
+                playerId = newPlayerId;
+                localStorage.setItem('playerId', newPlayerId);
+            });
+
+            socket.on('roomJoined', ({ roomId, playerId: newPlayerId, language: serverLanguage, playerName: serverPlayerName }) => {
+                console.log('room.html: Room joined:', { roomId, newPlayerId, serverLanguage, serverPlayerName });
+                playerId = newPlayerId;
+                playerName = serverPlayerName || playerName;
+                language = serverLanguage;
+                localStorage.setItem('playerId', newPlayerId);
+                localStorage.setItem('playerName', playerName);
+                localStorage.setItem('language', language);
+                isJoined = true;
+                localStorage.setItem('isJoined', 'true');
+                joinAttemptCount = 0;
+                updateUIText();
+                fetchRoomState();
+            });
+
+            socket.on('playerReconnected', ({ playerName }) => {
+                console.log('room.html: Player reconnected:', playerName);
+                fetchRoomState();
+            });
+
+            socket.on('playerStatus', ({ playerId: updatedPlayerId, ready, isDisconnected }) => {
+                console.log('room.html: Received playerStatus:', { updatedPlayerId, ready, isDisconnected });
+                if (updatedPlayerId === playerId) {
+                    updateReadyButton(ready, isDisconnected);
+                    restrictReadyButtonUpdate(ready, isDisconnected, updatedPlayerId);
+                    logReadyButtonState(ready, isDisconnected, updatedPlayerId);
+                }
+            });
+
+            socket.on('chatMessage', ({ playerName, message }) => {
+                console.log('room.html: Chat message received:', { playerName, message });
+                if (chatBox) {
+                    const messageEl = document.createElement('div');
+                    messageEl.textContent = `${playerName}: ${message}`;
+                    chatBox.appendChild(messageEl);
+                    chatBox.scrollTop = chatBox.scrollHeight;
+                }
+            });
+
+            // Початкове завантаження стану
+            fetchRoomState();
+
+            // Previous functions from earlier response
+            function updateReadyButton(isReady, isDisconnected) {
+                const readyBtn = document.getElementById('readyBtn');
+                readyBtn.disabled = isReady || isDisconnected;
+                readyBtn.textContent = isReady ? t('readyWaiting') : t('readyBtn');
+                console.log(`room.html: Updated ready button: disabled=${readyBtn.disabled}, text=${readyBtn.textContent}`);
+            }
+
+            function startAutoRefresh() {
+                const refreshInterval = setInterval(() => {
+                    console.log('room.html: Triggering auto-refresh');
+                    fetchRoomState();
+                }, 500);
+                window.addEventListener('beforeunload', () => {
+                    clearInterval(refreshInterval);
+                });
+            }
+
+            function restrictReadyButtonUpdate(isReady, isDisconnected, targetPlayerId) {
+                if (targetPlayerId !== playerId) {
+                    console.log(`room.html: Skipping ready button update for playerId=${targetPlayerId}, current playerId=${playerId}`);
+                    return;
+                }
+                const readyBtn = document.getElementById('readyBtn');
+                readyBtn.disabled = isReady || isDisconnected;
+                readyBtn.textContent = isReady ? t('readyWaiting') : t('readyBtn');
+                console.log(`room.html: Restricted ready button update: disabled=${readyBtn.disabled}, text=${readyBtn.textContent}, playerId=${targetPlayerId}`);
+            }
+
+            function logReadyButtonState(isReady, isDisconnected, targetPlayerId) {
+                const readyBtn = document.getElementById('readyBtn');
+                console.log(`room.html: Ready button state: disabled=${readyBtn.disabled}, text=${readyBtn.textContent}, isReady=${isReady}, isDisconnected=${isDisconnected}, targetPlayerId=${targetPlayerId}, currentPlayerId=${playerId}`);
+            }
+
+            // Start auto-refresh
+            startAutoRefresh();
+        });
+    </script>
+</body>
+</html>
