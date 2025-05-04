@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Card Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #2e7d32;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+            text-align: center;
+            width: 100%;
+            max-width: 400px;
+        }
+        h1 {
+            margin: 0 0 20px;
+            color: #d32f2f;
+        }
+        input, select, button {
+            display: block;
+            width: 100%;
+            margin: 10px 0;
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        #createRoomBtn {
+            background-color: #0288d1;
+        }
+        #clearSessionBtn {
+            background-color: #d32f2f;
+        }
+        button:hover:not(:disabled) {
+            opacity: 0.9;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #errorMessage {
+            color: #d32f2f;
+            margin-top: 10px;
+            min-height: 20px;
+        }
+        @media (max-width: 480px) {
+            .container {
+                width: 90%;
+                padding: 15px;
+            }
+            h1 {
+                font-size: 1.5em;
+            }
+            input, select, button {
+                font-size: 14px;
+                padding: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 id="title">Card Game</h1>
+        <input type="text" id="playerNameInput" placeholder="Enter your name">
+        <input type="text" id="roomIdInput" placeholder="Enter room code">
+        <button id="joinRoomBtn">Join Room</button>
+        <button id="createRoomBtn">Create Room</button>
+        <button id="clearSessionBtn">Clear Session</button>
+        <select id="languageSelect">
+            <option value="en">English</option>
+            <option value="uk">Українська</option>
+            <option value="ru">Русский</option>
+        </select>
+        <div id="errorMessage"></div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        console.log('index.html: Script started');
+        document.addEventListener('DOMContentLoaded', () => {
+            const socket = io({
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 2000
+            });
+            const playerNameInput = document.getElementById('playerNameInput');
+            const roomIdInput = document.getElementById('roomIdInput');
+            const languageSelect = document.getElementById('languageSelect');
+            const joinRoomBtn = document.getElementById('joinRoomBtn');
+            const createRoomBtn = document.getElementById('createRoomBtn');
+            const clearSessionBtn = document.getElementById('clearSessionBtn');
+            const errorMessage = document.getElementById('errorMessage');
+            const title = document.getElementById('title');
+
+            if (!playerNameInput || !roomIdInput || !languageSelect || !joinRoomBtn || !createRoomBtn || !clearSessionBtn || !errorMessage || !title) {
+                console.error('index.html: Required elements not found');
+                errorMessage.textContent = 'Required elements not found.';
+                return;
+            }
+
+            const translations = {
+                en: {
+                    title: 'Card Game',
+                    playerNamePlaceholder: 'Enter your name',
+                    roomIdPlaceholder: 'Enter room code',
+                    joinRoomBtn: 'Join Room',
+                    createRoomBtn: 'Create Room',
+                    clearSessionBtn: 'Clear Session',
+                    activeSessionError: 'Another session is active. Please clear the session first.',
+                    invalidNameError: 'Please enter a valid name.',
+                    invalidRoomError: 'Please enter a room code.',
+                    roomNotFound: 'Room not found.',
+                    roomFull: 'Room is full.',
+                    sessionTaken: 'This player is already connected from another session.',
+                    roomExists: 'Room code already taken.',
+                    serverError: 'An error occurred.'
+                },
+                uk: {
+                    title: 'Карткова гра',
+                    playerNamePlaceholder: 'Введіть ваше ім’я',
+                    roomIdPlaceholder: 'Введіть код кімнати',
+                    joinRoomBtn: 'Приєднатися до кімнати',
+                    createRoomBtn: 'Створити кімнату',
+                    clearSessionBtn: 'Очистити сесію',
+                    activeSessionError: 'Інша сесія активна. Будь ласка, спочатку очистіть сесію.',
+                    invalidNameError: 'Будь ласка, введіть дійсне ім’я.',
+                    invalidRoomError: 'Будь ласка, введіть код кімнати.',
+                    roomNotFound: 'Кімнату не знайдено.',
+                    roomFull: 'Кімната заповнена.',
+                    sessionTaken: 'Цей гравець уже підключений з іншої сесії.',
+                    roomExists: 'Код кімнати вже зайнятий.',
+                    serverError: 'Сталася помилка.'
+                },
+                ru: {
+                    title: 'Карточная игра',
+                    playerNamePlaceholder: 'Введите ваше имя',
+                    roomIdPlaceholder: 'Введите код комнаты',
+                    joinRoomBtn: 'Присоединиться к комнате',
+                    createRoomBtn: 'Создать комнату',
+                    clearSessionBtn: 'Очистить сессию',
+                    activeSessionError: 'Другая сессия активна. Пожалуйста, сначала очистите сессию.',
+                    invalidNameError: 'Пожалуйста, введите действительное имя.',
+                    invalidRoomError: 'Пожалуйста, введите код комнаты.',
+                    roomNotFound: 'Комната не найдена.',
+                    roomFull: 'Комната заполнена.',
+                    sessionTaken: 'Этот игрок уже подключен с другой сессии.',
+                    roomExists: 'Код комнаты уже занят.',
+                    serverError: 'Произошла ошибка.'
+                }
+            };
+
+            function t(key, lang) {
+                const language = lang || languageSelect.value || 'en';
+                return translations[language][key] || translations.en[key] || key;
+            }
+
+            function updateUIText() {
+                const lang = languageSelect.value || 'en';
+                title.textContent = t('title', lang);
+                playerNameInput.placeholder = t('playerNamePlaceholder', lang);
+                roomIdInput.placeholder = t('roomIdPlaceholder', lang);
+                joinRoomBtn.textContent = t('joinRoomBtn', lang);
+                createRoomBtn.textContent = t('createRoomBtn', lang);
+                clearSessionBtn.textContent = t('clearSessionBtn', lang);
+            }
+
+            languageSelect.addEventListener('change', () => {
+                localStorage.setItem('language', languageSelect.value);
+                updateUIText();
+            });
+
+            // Initialize language and UI
+            languageSelect.value = localStorage.getItem('language') || 'en';
+            updateUIText();
+
+            function showError(msg) {
+                errorMessage.textContent = msg;
+                setTimeout(() => errorMessage.textContent = '', 5000);
+            }
+
+            function generateUUID() {
+                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+                    return v.toString(16);
+                });
+            }
+
+            function generateRoomCode() {
+                return Math.floor(1000 + Math.random() * 9000).toString();
+            }
+
+            function checkActiveSession() {
+                return localStorage.getItem('isJoined') === 'true';
+            }
+
+            clearSessionBtn.addEventListener('click', () => {
+                console.log('index.html: Clearing session');
+                localStorage.clear();
+                showError('Session cleared. You can start a new session.');
+                joinRoomBtn.disabled = false;
+                createRoomBtn.disabled = false;
+                languageSelect.value = 'en';
+                updateUIText();
+            });
+
+            joinRoomBtn.addEventListener('click', () => {
+                if (checkActiveSession()) {
+                    showError(t('activeSessionError'));
+                    return;
+                }
+
+                const playerName = playerNameInput.value.trim();
+                const roomId = roomIdInput.value.trim().toLowerCase();
+                const language = languageSelect.value;
+                console.log('index.html: Join Room clicked', { playerName, roomId, language });
+
+                if (!playerName || playerName === 'undefined') {
+                    showError(t('invalidNameError'));
+                    return;
+                }
+                if (!roomId) {
+                    showError(t('invalidRoomError'));
+                    return;
+                }
+
+                joinRoomBtn.disabled = true;
+                createRoomBtn.disabled = true;
+                const playerId = generateUUID();
+                socket.emit('joinRoom', { roomId, playerName, playerId, language });
+
+                socket.once('roomJoined', ({ roomId, playerId, language, playerName }) => {
+                    console.log('index.html: Room joined', { roomId, playerId, language, playerName });
+                    localStorage.setItem('playerId', playerId);
+                    localStorage.setItem('playerName', playerName);
+                    localStorage.setItem('language', language);
+                    localStorage.setItem('isJoined', 'true');
+                    console.log('index.html: Saved to localStorage:', { playerId, playerName, language });
+                    setTimeout(() => {
+                        window.location.href = `/room?room=${roomId}`;
+                    }, 100);
+                });
+
+                socket.once('errorMessage', (msg) => {
+                    console.error('index.html: Error:', msg);
+                    showError(msg === 'Room does not exist.' ? t('roomNotFound') : 
+                              msg === 'Invalid player data.' ? t('invalidNameError') : 
+                              msg === 'Room is full.' ? t('roomFull') : 
+                              msg === 'Another session has taken over this player' ? t('sessionTaken') : 
+                              t('serverError'));
+                    joinRoomBtn.disabled = false;
+                    createRoomBtn.disabled = false;
+                });
+            });
+
+            createRoomBtn.addEventListener('click', () => {
+                if (checkActiveSession()) {
+                    showError(t('activeSessionError'));
+                    return;
+                }
+
+                const playerName = playerNameInput.value.trim();
+                const language = languageSelect.value;
+                console.log('index.html: Create Room clicked', { playerName, language });
+
+                if (!playerName || playerName === 'undefined') {
+                    showError(t('invalidNameError'));
+                    return;
+                }
+
+                joinRoomBtn.disabled = true;
+                createRoomBtn.disabled = true;
+                const roomId = generateRoomCode();
+                const playerId = generateUUID();
+                console.log('index.html: Emitting createRoom', { roomId, playerName, playerId, language });
+                socket.emit('createRoom', { roomId, playerName, playerId, language });
+
+                socket.once('roomCreated', ({ roomId, playerId, language, playerName }) => {
+                    console.log('index.html: Room created and joined', { roomId, playerId, language, playerName });
+                    localStorage.setItem('playerId', playerId);
+                    localStorage.setItem('playerName', playerName);
+                    localStorage.setItem('language', language);
+                    localStorage.setItem('isJoined', 'true');
+                    console.log('index.html: Saved to localStorage:', { playerId, playerName, language });
+                    setTimeout(() => {
+                        window.location.href = `/room?room=${roomId}`;
+                    }, 100);
+                });
+
+                socket.once('errorMessage', (msg) => {
+                    console.error('index.html: Error:', msg);
+                    showError(msg === 'Invalid player data.' ? t('invalidNameError') : 
+                              msg === 'Room already exists.' ? t('roomExists') : 
+                              msg === 'Another session has taken over this player' ? t('sessionTaken') : 
+                              t('serverError'));
+                    joinRoomBtn.disabled = false;
+                    createRoomBtn.disabled = false;
+                });
+            });
+
+            socket.on('connect', () => {
+                console.log('index.html: Socket connected:', socket.id);
+                joinRoomBtn.disabled = false;
+                createRoomBtn.disabled = false;
+                errorMessage.textContent = '';
+            });
+
+            socket.on('connect_error', (err) => {
+                console.error('index.html: Socket connection error:', err.message);
+                showError(t('serverError'));
+                joinRoomBtn.disabled = true;
+                createRoomBtn.disabled = true;
+            });
+
+            socket.on('setPlayerId', (newPlayerId) => {
+                console.log('index.html: Received setPlayerId:', newPlayerId);
+                localStorage.setItem('playerId', newPlayerId);
+            });
+        });
+    </script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'93a875225b4c4564',t:'MTc0NjM2NjUyNS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>
+</body>
+</html>
