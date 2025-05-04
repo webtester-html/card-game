@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Durak Room</title>
-    <link rel="stylesheet" href="/style.css">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -373,7 +372,6 @@
                     `<li>${player.name}${player.isDisconnected ? ` (${t('disconnected')})` : ''}</li>`
                 ).join('') : '<li>No players</li>';
                 playerCount.textContent = `${readyCount || 0}/${totalCount || 0}`;
-                // Removed button update to prevent affecting all players
             });
 
             socket.on('startGame', ({ trump, trumpCard, currentAttacker, currentDefender }) => {
@@ -437,10 +435,9 @@
                 }
             });
 
-            // Початкове завантаження стану
+            // Initial state fetch
             fetchRoomState();
 
-            // Previous functions from earlier response
             function updateReadyButton(isReady, isDisconnected) {
                 const readyBtn = document.getElementById('readyBtn');
                 readyBtn.disabled = isReady || isDisconnected;
