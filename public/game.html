@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Card Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #2e7d32;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: auto;
+        }
+
+        .game-container {
+            position: relative;
+            width: 100%;
+            max-width: 1200px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .language-selector {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+
+        .language-selector select {
+            padding: 5px;
+            font-size: 14px;
+            border-radius: 4px;
+        }
+
+        .player-area,
+        .opponent-area {
+            width: 100%;
+            text-align: center;
+        }
+
+        .player-area h2,
+        .opponent-area h2 {
+            margin: 10px 0;
+            color: white;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        }
+
+        .player-area .highlight,
+        .opponent-area .highlight {
+            background-color: rgba(255, 255, 0, 0.3);
+            padding: 5px;
+            border-radius: 4px;
+        }
+
+        .debug-info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 12px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 5px;
+            border-radius: 4px;
+        }
+
+        .deck-area {
+            position: absolute;
+            left: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .deck {
+            position: relative;
+        }
+
+        .trump-card {
+            margin-top: 15px;
+            transform: rotate(-90deg);
+        }
+
+        .trump-card .card {
+            width: 120px; /* Larger for prominence */
+            height: 168px;
+            border: 2px solid #ffd700; /* Gold border */
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5); /* Shadow for depth */
+        }
+
+        .deck-count {
+            color: white;
+            font-size: 14px;
+            margin-top: 10px;
+            text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.5);
+        }
+
+        .table-area {
+            flex-grow: 1;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .card-pair {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .hand {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .opponent-hand .card {
+            transform: scale(0.7);
+        }
+
+        .card {
+            width: 100px;
+            height: 140px;
+            background: white;
+            border: 1px solid #000;
+            border-radius: 8px;
+            box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 8px;
+            box-sizing: border-box;
+            position: relative;
+            cursor: pointer;
+            transition: transform 0.2s;
+            color: red;
+        }
+
+        .card:hover:not(.disabled) {
+            transform: translateY(-5px);
+        }
+
+        .card.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .card-back {
+            background: repeating-linear-gradient(45deg, #b71c1c, #b71c1c 10px, #d32f2f 10px, #d32f2f 20px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 14px;
+        }
+
+        .card .rank {
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .card .suit {
+            font-size: 24px;
+        }
+
+        .card .top-left,
+        .card .bottom-right {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .card .bottom-right {
+            transform: rotate(180deg);
+        }
+
+        .defense-card {
+            margin-top: -100px;
+            margin-left: 60px;
+            transform: rotate(10deg);
+        }
+
+        #endTurnBtn,
+        #takeCardsBtn {
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #0288d1;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px;
+            display: none;
+        }
+
+        #endTurnBtn:hover:not(:disabled),
+        #takeCardsBtn:hover:not(:disabled) {
+            background-color: #0277bd;
+        }
+
+        #endTurnBtn:disabled,
+        #takeCardsBtn:disabled {
+            background-color: #b0bec5;
+            cursor: not-allowed;
+        }
+
+        #errorMessage {
+            color: #ff5252;
+            margin: 10px 0;
+            text-align: center;
+            text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.5);
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-content h2 {
+            margin: 0 0 20px;
+            color: #d32f2f;
+        }
+
+        .modal-content button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .modal-content button:hover {
+            background-color: #45a049;
+        }
+
+        @media (max-width: 768px) {
+            .card {
+                width: 80px;
+                height: 112px;
+                padding: 6px;
+            }
+
+            .trump-card .card {
+                width: 96px;
+                height: 134.4px;
+            }
+
+            .card .rank {
+                font-size: 14px;
+            }
+
+            .card .suit {
+                font-size: 20px;
+            }
+
+            .defense-card {
+                margin-top: -80px;
+                margin-left: 48px;
+            }
+
+            .opponent-hand .card {
+                transform: scale(0.6);
+            }
+
+            .deck-area {
+                left: 10px;
+            }
+
+            #endTurnBtn,
+            #takeCardsBtn {
+                padding: 8px 16px;
+                font-size: 14px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .card {
+                width: 60px;
+                height: 84px;
+                padding: 4px;
+            }
+
+            .trump-card .card {
+                width: 72px;
+                height: 100.8px;
+            }
+
+            .card .rank {
+                font-size: 12px;
+            }
+
+            .card .suit {
+                font-size: 16px;
+            }
+
+            .defense-card {
+                margin-top: -60px;
+                margin-left: 36px;
+            }
+
+            .opponent-hand .card {
+                transform: scale(0.5);
+            }
+
+            .game-container {
+                padding: 10px;
+            }
+
+            .player-area h2,
+            .opponent-area h2 {
+                font-size: 1.2em;
+            }
+
+            #endTurnBtn,
+            #takeCardsBtn {
+                padding: 6px 12px;
+                font-size: 12px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="game-container">
+        <div class="language-selector">
+            <select id="languageSelect">
+                <option value="en">English</option>
+                <option value="uk">Українська</option>
+                <option value="ru">Русский</option>
+            </select>
+        </div>
+        <div class="debug-info" id="debugInfo"></div>
+        <div class="opponent-area">
+            <h2 id="opponentName"></h2>
+            <div class="hand opponent-hand" id="opponentHand"></div>
+        </div>
+        <div class="table-area" id="table"></div>
+        <div class="deck-area">
+            <div class="deck" id="deck"></div>
+            <div class="trump-card" id="trumpCard"></div>
+            <div class="deck-count" id="deckCount"></div>
+        </div>
+        <div class="player-area">
+            <h2 id="playerName"></h2>
+            <div class="hand" id="playerHand"></div>
+            <button id="endTurnBtn"></button>
+            <button id="takeCardsBtn"></button>
+            <div id="errorMessage"></div>
+        </div>
+        <div class="modal" id="gameOverModal">
+            <div class="modal-content">
+                <h2 id="gameOverMessage"></h2>
+                <button id="returnToLobby"></button>
+            </div>
+        </div>
+    </div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const translations = {
+            en: {
+                title: 'Card Game',
+                error_invalid_data: 'Invalid game data. Please rejoin the room.',
+                error_no_room: 'No room specified. Redirecting to lobby...',
+                error_no_player: 'No player name found. Please rejoin the room.',
+                error_session_taken: 'This player is already connected from another session. Please start a new session.',
+                end_turn: 'End Turn',
+                take_cards: 'Take Cards',
+                return_to_lobby: 'Return to Lobby',
+                you_win: 'You Win!',
+                you_lose: 'You Lose!',
+                waiting_reconnect: 'Waiting for players to reconnect...',
+                trump_card_error: 'Trump card not set properly.',
+                server_error: 'Failed to connect to server. Retrying...',
+                invalid_move: 'Invalid move! Please select a valid card.',
+                not_your_turn: 'Not your turn! Please wait.',
+                you_are_attacker: 'You - Attacker',
+                you_are_defender: 'You - Defender',
+                opponent_waiting: 'Waiting for opponent...',
+                opponent_attacker: 'Attacker',
+                opponent_defender: 'Defender',
+                deck_label: 'Deck',
+                game_not_found: 'Game not found. Redirecting to lobby...',
+                fetch_error: 'Failed to fetch game state.',
+                taking_cards: 'Taking cards...',
+                timeout_error: 'Action timed out. Retrying...'
+            },
+            uk: {
+                title: 'Карткова гра',
+                error_invalid_data: 'Недійсні дані гри. Будь ласка, перезайдіть у кімнату.',
+                error_no_room: 'Кімнату не вказано. Перенаправлення до лобі...',
+                error_no_player: 'Ім’я гравця не знайдено. Будь ласка, перезайдіть у кімнату.',
+                error_session_taken: 'Цей гравець уже підключений з іншої сесії. Будь ласка, почніть нову сесію.',
+                end_turn: 'Завершити хід',
+                take_cards: 'Взяти карти',
+                return_to_lobby: 'Повернутися до лобі',
+                you_win: 'Ви перемогли!',
+                you_lose: 'Ви програли!',
+                waiting_reconnect: 'Очікування повторного підключення гравців...',
+                trump_card_error: 'Козирну карту не встановлено належним чином.',
+                server_error: 'Не вдалося підключитися до сервера. Повторна спроба...',
+                invalid_move: 'Недійсний хід! Виберіть правильну карту.',
+                not_your_turn: 'Не ваш хід! Зачекайте.',
+                you_are_attacker: 'Ви - Атакуючий',
+                you_are_defender: 'Ви - Захисник',
+                opponent_waiting: 'Очікування суперника...',
+                opponent_attacker: 'Атакуючий',
+                opponent_defender: 'Захисник',
+                deck_label: 'Колода',
+                game_not_found: 'Гру не знайдено. Перенаправлення до лобі...',
+                fetch_error: 'Не вдалося отримати стан гри.',
+                taking_cards: 'Беремо карти...',
+                timeout_error: 'Час дії минув. Спробуємо ще раз...'
+            },
+            ru: {
+                title: 'Карточная игра',
+                error_invalid_data: 'Недействительные данные игры. Пожалуйста, перезайдите в комнату.',
+                error_no_room: 'Комната не указана. Перенаправление в лобби...',
+                error_no_player: 'Имя игрока не найдено. Пожалуйста, перезайдите в комнату.',
+                error_session_taken: 'Этот игрок уже подключен с другой сессии. Пожалуйста, начните новую сессию.',
+                end_turn: 'Завершить ход',
+                take_cards: 'Взять карты',
+                return_to_lobby: 'Вернуться в лобби',
+                you_win: 'Вы победили!',
+                you_lose: 'Вы проиграли!',
+                waiting_reconnect: 'Ожидание повторного подключения игроков...',
+                trump_card_error: 'Козырная карта не установлена корректно.',
+                server_error: 'Не удалось подключиться к серверу. Повторная попытка...',
+                invalid_move: 'Недействительный ход! Выберите правильную карту.',
+                not_your_turn: 'Не ваш ход! Подождите.',
+                you_are_attacker: 'Вы - Атакующий',
+                you_are_defender: 'Вы - Защитник',
+                opponent_waiting: 'Ожидание соперника...',
+                opponent_attacker: 'Атакующий',
+                opponent_defender: 'Защитник',
+                deck_label: 'Колода',
+                game_not_found: 'Игра не найдена. Перенаправление в лобби...',
+                fetch_error: 'Не удалось получить состояние игры.',
+                taking_cards: 'Берем карты...',
+                timeout_error: 'Время действия истекло. Пробуем снова...'
+            }
+        };
+
+        function t(key) {
+            const lang = localStorage.getItem('language') || 'en';
+            return translations[lang][key] || translations.en[key] || key;
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('game.html: Script started');
+            const socket = io({
+                reconnection: true,
+                reconnectionAttempts: 15,
+                reconnectionDelay: 1000
+            });
+            const playerNameEl = document.getElementById('playerName');
+            const opponentNameEl = document.getElementById('opponentName');
+            const playerHandEl = document.getElementById('playerHand');
+            const opponentHandEl = document.getElementById('opponentHand');
+            const tableEl = document.getElementById('table');
+            const deckEl = document.getElementById('deck');
+            const trumpCardEl = document.getElementById('trumpCard');
+            const deckCountEl = document.getElementById('deckCount');
+            const endTurnBtn = document.getElementById('endTurnBtn');
+            const takeCardsBtn = document.getElementById('takeCardsBtn');
+            const errorMessageEl = document.getElementById('errorMessage');
+            const gameOverModal = document.getElementById('gameOverModal');
+            const gameOverMessage = document.getElementById('gameOverMessage');
+            const returnToLobby = document.getElementById('returnToLobby');
+            const languageSelect = document.getElementById('languageSelect');
+            const debugInfoEl = document.getElementById('debugInfo');
+            let isTakingCards = false;
+            let takeCardsTimeout = null;
+            let takeCardsAttempts = 0;
+            const maxTakeCardsAttempts = 3;
+
+            // Initialize language
+            languageSelect.value = localStorage.getItem('language') || 'en';
+            languageSelect.addEventListener('change', () => {
+                localStorage.setItem('language', languageSelect.value);
+                updateUIText();
+                socket.emit('changeLanguage', { playerId: playerId, language: languageSelect.value });
+            });
+
+            function updateUIText() {
+                endTurnBtn.textContent = t('end_turn');
+                takeCardsBtn.textContent = isTakingCards ? t('taking_cards') : t('take_cards');
+                returnToLobby.textContent = t('return_to_lobby');
+                const deckCount = deckCountEl.textContent.replace(/[^0-9]/g, '') || 0;
+                deckCountEl.textContent = `${t('deck_label')}: ${deckCount}`;
+            }
+            updateUIText();
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomId = urlParams.get('room');
+            let playerName = localStorage.getItem('playerName');
+
+            console.log('game.html: Initial data:', { roomId, playerName });
+
+            if (!roomId) {
+                console.error('game.html: No roomId provided');
+                errorMessageEl.textContent = t('error_no_room');
+                setTimeout(() => window.location.href = '/', 2000);
+                return;
+            }
+            if (!playerName) {
+                console.error('game.html: No playerName found in localStorage');
+                errorMessageEl.textContent = t('error_no_player');
+                setTimeout(() => window.location.href = '/', 2000);
+                return;
+            }
+
+            localStorage.setItem('roomId', roomId);
+            let playerId = localStorage.getItem('playerId');
+
+            let joinAttemptCount = 0;
+            const maxJoinAttempts = 10;
+
+            const suitSymbols = {
+                Hearts: '♥',
+                Diamonds: '♦',
+                Clubs: '♣',
+                Spades: '♠'
+            };
+
+            const rankDisplay = {
+                '6': '6',
+                '7': '7',
+                '8': '8',
+                '9': '9',
+                '10': '10',
+                'Jack': 'В',
+                'Queen': 'Д',
+                'King': 'К',
+                'Ace': 'Т'
+            };
+
+            const rankOrder = ['6', '7', '8', '9', '10', 'Jack', 'Queen', 'King', 'Ace'];
+
+            function renderCard(card, clickable = false, role = null) {
+                if (!card || !card.rank || !card.suit) {
+                    console.warn('game.html: Invalid card data:', card);
+                    return '';
+                }
+                const suitClass = card.suit.toLowerCase();
+                const isDisabled = !clickable ? 'disabled' : '';
+                const displayRank = rankDisplay[card.rank] || card.rank;
+                return `
+                    <div class="card ${suitClass} ${isDisabled}" data-rank="${card.rank}" data-suit="${card.suit}" ${role ? `data-role="${role}"` : ''}>
+                        <div class="top-left">
+                            <div class="rank">${displayRank}</div>
+                            <div class="suit">${suitSymbols[card.suit]}</div>
+                        </div>
+                        <div class="bottom-right">
+                            <div class="rank">${displayRank}</div>
+                            <div class="suit">${suitSymbols[card.suit]}</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            function renderCardBack() {
+                return `<div class="card card-back"></div>`;
+            }
+
+            function renderDeck(count) {
+                if (count <= 0) return '';
+                let cards = '';
+                for (let i = 0; i < Math.min(count, 3); i++) {
+                    const offset = i * 2;
+                    cards += `<div class="card card-back" style="position: absolute; top: ${offset}px; left: ${offset}px;"></div>`;
+                }
+                return cards;
+            }
+
+            function isValidAttackCard(card, table, trumpSuit) {
+                if (!table.length) return true;
+                return table.some(pair => pair.attack.rank === card.rank);
+            }
+
+            function isValidDefenseCard(card, table, trumpSuit) {
+                const lastAttack = table.find(pair => pair.attack && !pair.defense);
+                if (!lastAttack) return false;
+                if (card.suit === lastAttack.attack.suit) {
+                    return rankOrder.indexOf(card.rank) > rankOrder.indexOf(lastAttack.attack.rank);
+                }
+                return card.suit === trumpSuit;
+            }
+
+            function updateDebugInfo() {
+                debugInfoEl.textContent = `${t('title')} - Room: ${roomId}, Player: ${playerName}, ID: ${playerId || 'Not assigned'}`;
+            }
+
+            function resetTakeCardsState() {
+                isTakingCards = false;
+                takeCardsBtn.disabled = false;
+                takeCardsBtn.textContent = t('take_cards');
+                if (takeCardsTimeout) {
+                    clearTimeout(takeCardsTimeout);
+                    takeCardsTimeout = null;
+                }
+            }
+
+            function updateGameUI(data) {
+                console.log('game.html: Updating UI with:', {
+                    players: data.players.map(p => ({ id: p.id, name: p.name })),
+                    trump: data.trump,
+                    deckCount: data.deckCount,
+                    currentAttacker: data.currentAttacker,
+                    currentDefender: data.currentDefender
+                });
+
+                const player = data.players.find(p => p.name === playerName);
+                const opponent = data.players.find(p => p.id !== (player ? player.id : null));
+                const currentAttacker = data.currentAttacker;
+                const currentDefender = data.currentDefender;
+                const table = data.table || [];
+                const deckCount = data.deckCount || 0;
+                const trump = data.trump;
+
+                if (!player) {
+                    console.error('game.html: Player not found:', { playerName, players: data.players });
+                    showError(t('error_invalid_data'));
+                    setTimeout(() => {
+                        localStorage.clear();
+                        window.location.href = '/';
+                    }, 2000);
+                    return;
+                }
+
+                if (!opponent) {
+                    console.warn('game.html: Opponent not found, waiting for reconnect');
+                    showError(t('waiting_reconnect'));
+                }
+
+                if (player.id !== playerId) {
+                    playerId = player.id;
+                    localStorage.setItem('playerId', playerId);
+                    console.log('game.html: Updated playerId:', playerId);
+                }
+
+                console.log('game.html: Roles:', { currentAttacker, currentDefender });
+
+                playerNameEl.textContent = `${player.name} (${player.id === currentAttacker ? t('you_are_attacker') : player.id === currentDefender ? t('you_are_defender') : 'You'})${player.isDisconnected ? ' (Disconnected)' : ''}`;
+                opponentNameEl.textContent = opponent ? `${opponent.name}${opponent.id === currentAttacker ? ` (${t('opponent_attacker')})` : opponent.id === currentDefender ? ` (${t('opponent_defender')})` : ''}${opponent.isDisconnected ? ' (Disconnected)' : ''}` : t('opponent_waiting');
+                playerNameEl.classList.toggle('highlight', player.id === currentAttacker || player.id === currentDefender);
+                opponentNameEl.classList.toggle('highlight', opponent && (opponent.id === currentAttacker || opponent.id === currentDefender));
+
+                playerHandEl.innerHTML = player.hand.map(card => {
+                    const isAttacker = player.id === currentAttacker;
+                    const isDefender = player.id === currentDefender;
+                    const isValidMove = isAttacker ? isValidAttackCard(card, table, trump ? trump.suit : null) : isDefender ? isValidDefenseCard(card, table, trump ? trump.suit : null) : false;
+                    return renderCard(card, (isAttacker || isDefender) && isValidMove && !player.isDisconnected, isAttacker ? 'attack' : 'defend');
+                }).join('');
+                opponentHandEl.innerHTML = opponent ? opponent.hand.map(() => renderCardBack()).join('') : '';
+                tableEl.innerHTML = table.map(pair => `
+                    <div class="card-pair">
+                        ${pair.attack ? renderCard(pair.attack) : ''}
+                        ${pair.defense ? renderCard(pair.defense, false, 'defense-card') : ''}
+                    </div>
+                `).join('');
+                deckEl.innerHTML = renderDeck(deckCount);
+                deckCountEl.textContent = `${t('deck_label')}: ${deckCount}`;
+                console.log('game.html: Deck count:', deckCount);
+
+                if (trump && trump.card && trump.card.rank && trump.card.suit) {
+                    trumpCardEl.innerHTML = renderCard(trump.card, false);
+                    console.log('game.html: Trump card rendered:', trump.card);
+                } else {
+                    trumpCardEl.innerHTML = '';
+                    console.warn('game.html: No valid trump card received:', trump);
+                    showError(t('trump_card_error'));
+                }
+
+                const hasUnbeatenCards = table.some(pair => pair.attack && !pair.defense);
+                endTurnBtn.style.display = (currentDefender === player.id && !hasUnbeatenCards && !player.isDisconnected) ? 'inline-block' : 'none';
+                takeCardsBtn.style.display = (currentDefender === player.id && hasUnbeatenCards && !player.isDisconnected) ? 'inline-block' : 'none';
+                takeCardsBtn.disabled = !hasUnbeatenCards || isTakingCards;
+                takeCardsBtn.textContent = isTakingCards ? t('taking_cards') : t('take_cards');
+                updateDebugInfo();
+            }
+
+            function showError(msg) {
+                errorMessageEl.textContent = msg;
+                setTimeout(() => errorMessageEl.textContent = '', 3000);
+            }
+
+            function validateGameData(data) {
+                if (!data || !data.roomId || !data.playerName) {
+                    console.error('game.html: Invalid game data:', data);
+                    showError(t('error_invalid_data'));
+                    setTimeout(() => {
+                        localStorage.clear();
+                        window.location.href = '/';
+                    }, 2000);
+                    return false;
+                }
+                return true;
+            }
+
+            function restorePlayerSession() {
+                console.log('game.html: Restoring session for:', { roomId, playerId, playerName });
+                if (!validateGameData({ roomId, playerName })) return;
+                fetch(`/game/${roomId}`)
+                    .then(response => {
+                        if (!response.ok) throw new Error('Game fetch failed');
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('game.html: Game state received:', data);
+                        if (data.error) {
+                            showError(t('game_not_found'));
+                            setTimeout(() => {
+                                localStorage.clear();
+                                window.location.href = '/';
+                            }, 2000);
+                            return;
+                        }
+                        const player = data.players.find(p => p.name === playerName);
+                        if (player) {
+                            playerId = player.id;
+                            localStorage.setItem('playerId', playerId);
+                            console.log('game.html: Restored playerId:', playerId);
+                            socket.emit('reconnectPlayer', { roomId, playerId, playerName });
+                            updateGameUI(data);
+                        } else {
+                            console.error('game.html: Player not found in game:', { playerName });
+                            showError(t('error_invalid_data'));
+                            setTimeout(() => {
+                                localStorage.clear();
+                                window.location.href = '/';
+                            }, 2000);
+                        }
+                    })
+                    .catch(err => {
+                        console.error('game.html: Fetch error:', err);
+                        showError(t('fetch_error'));
+                    });
+            }
+
+            function attemptJoinRoom() {
+                if (joinAttemptCount >= maxJoinAttempts) {
+                    showError(t('error_invalid_data'));
+                    localStorage.clear();
+                    setTimeout(() => window.location.href = '/', 2000);
+                    return;
+                }
+                joinAttemptCount++;
+                console.log('game.html: Attempting to join room', roomId, 'attempt', joinAttemptCount, 'playerId:', playerId);
+                socket.emit('joinRoom', { roomId, playerName, playerId: playerId || '' });
+            }
+
+            function setupSocketListeners() {
+                socket.removeAllListeners('connect_error');
+                socket.removeAllListeners('roomJoined');
+                socket.removeAllListeners('startGame');
+                socket.removeAllListeners('updateGame');
+                socket.removeAllListeners('gamePaused');
+                socket.removeAllListeners('gameEnded');
+                socket.removeAllListeners('gameOver');
+                socket.removeAllListeners('errorMessage');
+                socket.removeAllListeners('setPlayerId');
+
+                socket.on('connect_error', (err) => {
+                    console.log('game.html: Connection error:', err.message);
+                    showError(t('server_error'));
+                });
+
+                socket.on('roomJoined', ({ roomId, playerId: newPlayerId, playerName: serverPlayerName }) => {
+                    console.log('game.html: Room joined:', { roomId, newPlayerId, serverPlayerName });
+                    if (serverPlayerName !== playerName) {
+                        console.error('game.html: Player name mismatch:', { expected: playerName, received: serverPlayerName });
+                        showError(t('error_invalid_data'));
+                        setTimeout(() => {
+                            localStorage.clear();
+                            window.location.href = '/';
+                        }, 2000);
+                        return;
+                    }
+                    playerId = newPlayerId;
+                    localStorage.setItem('playerId', playerId);
+                    localStorage.setItem('playerName', playerName);
+                    localStorage.setItem('roomId', roomId);
+                    updateDebugInfo();
+                });
+
+                socket.on('startGame', ({ trump, currentAttacker, currentDefender }) => {
+                    console.log('game.html: Received startGame:', { trump, currentAttacker, currentDefender });
+                    if (trump && trump.card && trump.card.rank && trump.card.suit) {
+                        trumpCardEl.innerHTML = renderCard(trump.card, false);
+                        console.log('game.html: Trump card set on startGame:', trump.card);
+                    } else {
+                        console.warn('game.html: Invalid trump card on startGame:', trump);
+                        showError(t('trump_card_error'));
+                    }
+                });
+
+                socket.on('updateGame', (data) => {
+                    console.log('game.html: Received updateGame:', data);
+                    resetTakeCardsState();
+                    updateGameUI(data);
+                });
+
+                socket.on('gamePaused', ({ message }) => {
+                    console.log('game.html: Game paused:', message);
+                    showError(t('waiting_reconnect'));
+                    const actionButtons = document.querySelectorAll('#endTurnBtn, #takeCardsBtn, .card');
+                    actionButtons.forEach(btn => btn.disabled = true);
+                });
+
+                socket.on('gameEnded', ({ winner }) => {
+                    console.log('game.html: Game ended, winner:', winner);
+                    const isWinner = winner === playerName;
+                    gameOverMessage.textContent = isWinner ? t('you_win') : t('you_lose');
+                    gameOverModal.style.display = 'flex';
+                    localStorage.clear();
+                });
+
+                socket.on('gameOver', ({ winners }) => {
+                    console.log('game.html: Game over, winners:', winners);
+                    const isWinner = winners.includes(playerName);
+                    gameOverMessage.textContent = isWinner ? t('you_win') : t('you_lose');
+                    gameOverModal.style.display = 'flex';
+                    localStorage.clear();
+                });
+
+                socket.on('errorMessage', (msg) => {
+                    console.log('game.html: Error:', msg);
+                    resetTakeCardsState();
+                    if (msg.includes('Another session has taken over this player')) {
+                        showError(t('error_session_taken'));
+                        localStorage.clear();
+                        setTimeout(() => window.location.href = '/', 2000);
+                        return;
+                    }
+                    showError(msg);
+                    if (msg.includes('Room does not exist') || msg.includes('Game room does not exist') || msg.includes('Player not found')) {
+                        localStorage.clear();
+                        setTimeout(() => window.location.href = '/', 2000);
+                    }
+                });
+
+                socket.on('setPlayerId', (newPlayerId) => {
+                    console.log('game.html: Received new playerId:', newPlayerId);
+                    playerId = newPlayerId;
+                    localStorage.setItem('playerId', playerId);
+                    attemptJoinRoom();
+                });
+
+                socket.on('roomDeleted', (message) => {
+                    console.log('game.html: Room deleted:', message);
+                    showError(message);
+                    localStorage.clear();
+                    setTimeout(() => window.location.href = '/', 2000);
+                });
+            }
+
+            socket.on('connect', () => {
+                console.log('game.html: Socket connected:', socket.id);
+                joinAttemptCount = 0;
+                if (!validateGameData({ roomId, playerName })) {
+                    restorePlayerSession();
+                    return;
+                }
+                setupSocketListeners();
+                socket.emit('reconnectPlayer', { roomId, playerId, playerName });
+                attemptJoinRoom();
+            });
+
+            window.addEventListener('beforeunload', () => {
+                console.log('game.html: Window unloading, sending tempDisconnect');
+                socket.emit('tempDisconnect', { roomId, playerId, playerName });
+                localStorage.setItem('playerId', playerId || '');
+                localStorage.setItem('playerName', playerName);
+                localStorage.setItem('roomId', roomId);
+            });
+
+            playerHandEl.addEventListener('click', (e) => {
+                const cardEl = e.target.closest('.card');
+                if (!cardEl || cardEl.classList.contains('disabled')) {
+                    showError(t('not_your_turn'));
+                    return;
+                }
+
+                const rank = cardEl.dataset.rank;
+                const suit = cardEl.dataset.suit;
+                const role = cardEl.dataset.role;
+
+                if (!rank || !suit || !role) {
+                    console.warn('game.html: Invalid card data:', { rank, suit, role });
+                    showError(t('invalid_move'));
+                    return;
+                }
+
+                console.log('game.html: Playing card:', { rank, suit, role, playerId });
+                socket.emit('playCard', {
+                    roomId,
+                    playerName,
+                    playerId,
+                    card: { rank, suit },
+                    role
+                });
+            });
+
+            endTurnBtn.addEventListener('click', () => {
+                console.log('game.html: Ending turn for player:', { playerId, playerName });
+                socket.emit('endTurn', { roomId, playerId, playerName });
+            });
+
+            takeCardsBtn.addEventListener('click', () => {
+                if (isTakingCards) {
+                    console.warn('game.html: Take Cards action blocked: already in progress');
+                    showError(t('not_your_turn'));
+                    return;
+                }
+
+                console.log('game.html: Taking cards for player:', { playerId, playerName, roomId });
+                isTakingCards = true;
+                takeCardsBtn.disabled = true;
+                takeCardsBtn.textContent = t('taking_cards');
+
+                socket.emit('takeCards', { roomId, playerId, playerName });
+
+                takeCardsTimeout = setTimeout(() => {
+                    console.warn('game.html: takeCards action timed out');
+                    resetTakeCardsState();
+                    showError(t('timeout_error'));
+                }, 5000);
+            });
+
+            returnToLobby.addEventListener('click', () => {
+                console.log('game.html: Returning to lobby');
+                socket.emit('leaveGame', { roomId, playerId, playerName });
+                window.location.href = '/';
+            });
+
+            // Initial setup
+            setupSocketListeners();
+            attemptJoinRoom();
+        });
+    </script>
+</body>
+
+</html>
