@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -17,7 +16,6 @@
             min-height: 100vh;
             overflow: auto;
         }
-
         .game-container {
             position: relative;
             width: 100%;
@@ -30,39 +28,33 @@
             padding: 20px;
             box-sizing: border-box;
         }
-
         .language-selector {
             position: absolute;
             top: 10px;
             right: 10px;
         }
-
         .language-selector select {
             padding: 5px;
             font-size: 14px;
             border-radius: 4px;
         }
-
         .player-area,
         .opponent-area {
             width: 100%;
             text-align: center;
         }
-
         .player-area h2,
         .opponent-area h2 {
             margin: 10px 0;
             color: white;
             text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
         }
-
         .player-area .highlight,
         .opponent-area .highlight {
             background-color: rgba(255, 255, 0, 0.3);
             padding: 5px;
             border-radius: 4px;
         }
-
         .debug-info {
             position: absolute;
             top: 10px;
@@ -73,7 +65,6 @@
             padding: 5px;
             border-radius: 4px;
         }
-
         .deck-area {
             position: absolute;
             left: 20px;
@@ -83,30 +74,25 @@
             flex-direction: column;
             align-items: center;
         }
-
         .deck {
             position: relative;
         }
-
         .trump-card {
             margin-top: 15px;
             transform: rotate(-90deg);
         }
-
         .trump-card .card {
-            width: 120px; /* Larger for prominence */
+            width: 120px;
             height: 168px;
-            border: 2px solid #ffd700; /* Gold border */
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5); /* Shadow for depth */
+            border: 2px solid #ffd700;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
         }
-
         .deck-count {
             color: white;
             font-size: 14px;
             margin-top: 10px;
             text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.5);
         }
-
         .table-area {
             flex-grow: 1;
             width: 100%;
@@ -116,25 +102,21 @@
             flex-wrap: wrap;
             gap: 20px;
         }
-
         .card-pair {
             display: flex;
             flex-direction: column;
             align-items: center;
             gap: 10px;
         }
-
         .hand {
             display: flex;
             justify-content: center;
             gap: 10px;
             flex-wrap: wrap;
         }
-
         .opponent-hand .card {
             transform: scale(0.7);
         }
-
         .card {
             width: 100px;
             height: 140px;
@@ -152,16 +134,13 @@
             transition: transform 0.2s;
             color: red;
         }
-
         .card:hover:not(.disabled) {
             transform: translateY(-5px);
         }
-
         .card.disabled {
             opacity: 0.5;
             cursor: not-allowed;
         }
-
         .card-back {
             background: repeating-linear-gradient(45deg, #b71c1c, #b71c1c 10px, #d32f2f 10px, #d32f2f 20px);
             display: flex;
@@ -170,16 +149,13 @@
             color: white;
             font-size: 14px;
         }
-
         .card .rank {
             font-size: 18px;
             font-weight: bold;
         }
-
         .card .suit {
             font-size: 24px;
         }
-
         .card .top-left,
         .card .bottom-right {
             flex: 1;
@@ -187,17 +163,14 @@
             flex-direction: column;
             align-items: center;
         }
-
         .card .bottom-right {
             transform: rotate(180deg);
         }
-
         .defense-card {
             margin-top: -100px;
             margin-left: 60px;
             transform: rotate(10deg);
         }
-
         #endTurnBtn,
         #takeCardsBtn {
             padding: 10px 20px;
@@ -210,25 +183,21 @@
             margin: 10px;
             display: none;
         }
-
         #endTurnBtn:hover:not(:disabled),
         #takeCardsBtn:hover:not(:disabled) {
             background-color: #0277bd;
         }
-
         #endTurnBtn:disabled,
         #takeCardsBtn:disabled {
             background-color: #b0bec5;
             cursor: not-allowed;
         }
-
         #errorMessage {
             color: #ff5252;
             margin: 10px 0;
             text-align: center;
             text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.5);
         }
-
         .modal {
             display: none;
             position: fixed;
@@ -241,7 +210,6 @@
             align-items: center;
             z-index: 1000;
         }
-
         .modal-content {
             background: white;
             padding: 20px;
@@ -251,12 +219,10 @@
             width: 90%;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
         }
-
         .modal-content h2 {
             margin: 0 0 20px;
             color: #d32f2f;
         }
-
         .modal-content button {
             padding: 10px 20px;
             background-color: #4CAF50;
@@ -265,89 +231,71 @@
             border-radius: 4px;
             cursor: pointer;
         }
-
         .modal-content button:hover {
             background-color: #45a049;
         }
-
         @media (max-width: 768px) {
             .card {
                 width: 80px;
                 height: 112px;
                 padding: 6px;
             }
-
             .trump-card .card {
                 width: 96px;
                 height: 134.4px;
             }
-
             .card .rank {
                 font-size: 14px;
             }
-
             .card .suit {
                 font-size: 20px;
             }
-
             .defense-card {
                 margin-top: -80px;
                 margin-left: 48px;
             }
-
             .opponent-hand .card {
                 transform: scale(0.6);
             }
-
             .deck-area {
                 left: 10px;
             }
-
             #endTurnBtn,
             #takeCardsBtn {
                 padding: 8px 16px;
                 font-size: 14px;
             }
         }
-
         @media (max-width: 480px) {
             .card {
                 width: 60px;
                 height: 84px;
                 padding: 4px;
             }
-
             .trump-card .card {
                 width: 72px;
                 height: 100.8px;
             }
-
             .card .rank {
                 font-size: 12px;
             }
-
             .card .suit {
                 font-size: 16px;
             }
-
             .defense-card {
                 margin-top: -60px;
                 margin-left: 36px;
             }
-
             .opponent-hand .card {
                 transform: scale(0.5);
             }
-
             .game-container {
                 padding: 10px;
             }
-
             .player-area h2,
             .opponent-area h2 {
                 font-size: 1.2em;
             }
-
             #endTurnBtn,
             #takeCardsBtn {
                 padding: 6px 12px;
@@ -356,7 +304,6 @@
         }
     </style>
 </head>
-
 <body>
     <div class="game-container">
         <div class="language-selector">
@@ -976,5 +923,4 @@
         });
     </script>
 </body>
-
 </html>
