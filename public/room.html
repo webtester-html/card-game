@@ -117,7 +117,7 @@
         <h1 id="title">Durak Room</h1>
         <div class="room-info">
             <p id="roomCodeLabel">Room Code: <span id="roomCode"></span></p>
-            <p id="playerCountLabel">Players: <span id="playerCount">0/0</span></p>
+            <p id="playerCountLabel">Players (Ready/Total): <span id="playerCount">0/0</span></p>
         </div>
         <ul id="playerList"></ul>
         <button id="readyBtn">Ready</button>
@@ -191,7 +191,8 @@
                     readyWaiting: 'Ready (Waiting)',
                     leaveRoomBtn: 'Exit Room',
                     chatPlaceholder: 'Type a message...',
-                    disconnected: 'disconnected'
+                    disconnected: 'disconnected',
+                    minPlayers: 'Need at least 2 ready players to start...'
                 },
                 uk: {
                     title: 'Кімната Дурак',
@@ -201,7 +202,8 @@
                     readyWaiting: 'Готовий (Очікування)',
                     leaveRoomBtn: 'Вийти з кімнати',
                     chatPlaceholder: 'Введіть повідомлення...',
-                    disconnected: 'відключений'
+                    disconnected: 'відключений',
+                    minPlayers: 'Потрібно щонайменше 2 готових гравці для початку...'
                 },
                 ru: {
                     title: 'Комната Дурак',
@@ -211,7 +213,8 @@
                     readyWaiting: 'Готов (Ожидание)',
                     leaveRoomBtn: 'Выйти из комнаты',
                     chatPlaceholder: 'Введите сообщение...',
-                    disconnected: 'отключен'
+                    disconnected: 'отключен',
+                    minPlayers: 'Нужно как минимум 2 готовых игрока для старта...'
                 }
             };
 
@@ -292,6 +295,9 @@
                             `<li class="${player.ready ? 'ready' : ''}">${player.name}${player.isDisconnected ? ` (${t('disconnected')})` : ''}</li>`
                         ).join('') : '<li>No players</li>';
                         playerCount.textContent = `${data.readyCount || 0}/${data.totalCount || 0}`;
+                        if (data.readyCount < 2 && data.totalCount >= 2) {
+                            showError(t('minPlayers'));
+                        }
                         const currentPlayer = data.players && data.players.find(p => p.name === playerName);
                         console.log('room.html: Current player check:', { playerName, currentPlayer });
                         if (currentPlayer) {
@@ -376,6 +382,9 @@
                     `<li class="${player.ready ? 'ready' : ''}">${player.name}${player.isDisconnected ? ` (${t('disconnected')})` : ''}</li>`
                 ).join('') : '<li>No players</li>';
                 playerCount.textContent = `${readyCount || 0}/${totalCount || 0}`;
+                if (readyCount < 2 && totalCount >= 2) {
+                    showError(t('minPlayers'));
+                }
             });
 
             socket.on('startGame', ({ trump, trumpCard, currentAttacker, currentDefender }) => {
