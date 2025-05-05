@@ -44,41 +44,30 @@
             position: absolute;
             bottom: 20px;
         }
-        .opponent-area {
+        .opponents-container {
             width: 100%;
-            text-align: center;
             display: flex;
-            justify-content: space-between;
+            flex-wrap: wrap;
+            justify-content: center;
             position: absolute;
             top: 20px;
+            gap: 20px;
         }
-        .opponent-left {
-            position: absolute;
-            left: 20px;
-            top: 50%;
-            transform: translateY(-50%);
-            text-align: left;
-        }
-        .opponent-right {
-            position: absolute;
-            right: 20px;
-            top: 50%;
-            transform: translateY(-50%);
-            text-align: right;
+        .opponent-area {
+            text-align: center;
+            flex: 1;
+            min-width: 150px;
+            max-width: 250px;
         }
         .player-area h2,
-        .opponent-area h2,
-        .opponent-left h2,
-        .opponent-right h2 {
+        .opponent-area h2 {
             margin: 10px 0;
             color: white;
             text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
             font-size: 1.2em;
         }
         .player-area .highlight,
-        .opponent-area .highlight,
-        .opponent-left .highlight,
-        .opponent-right .highlight {
+        .opponent-area .highlight {
             background-color: rgba(255, 255, 0, 0.3);
             padding: 5px;
             border-radius: 4px;
@@ -142,12 +131,8 @@
             gap: 10px;
             flex-wrap: wrap;
         }
-        .opponent-hand .card {
+        .opponent-area .hand .card {
             transform: scale(0.7);
-        }
-        .opponent-left .hand,
-        .opponent-right .hand {
-            flex-direction: column;
         }
         .card {
             width: 100px;
@@ -286,7 +271,7 @@
                 margin-top: -80px;
                 margin-left: 48px;
             }
-            .opponent-hand .card {
+            .opponent-area .hand .card {
                 transform: scale(0.6);
             }
             .deck-area {
@@ -297,15 +282,13 @@
                 padding: 8px 16px;
                 font-size: 14px;
             }
-            .opponent-area {
+            .opponents-container {
                 flex-direction: column;
                 align-items: center;
             }
-            .opponent-left,
-            .opponent-right {
-                position: static;
-                transform: none;
-                margin: 10px 0;
+            .opponent-area {
+                min-width: 100px;
+                max-width: 200px;
             }
         }
         @media (max-width: 480px) {
@@ -328,16 +311,14 @@
                 margin-top: -60px;
                 margin-left: 36px;
             }
-            .opponent-hand .card {
+            .opponent-area .hand .card {
                 transform: scale(0.5);
             }
             .game-container {
                 padding: 10px;
             }
             .player-area h2,
-            .opponent-area h2,
-            .opponent-left h2,
-            .opponent-right h2 {
+            .opponent-area h2 {
                 font-size: 1em;
             }
             #endTurnBtn,
@@ -358,20 +339,7 @@
             </select>
         </div>
         <div class="debug-info" id="debugInfo"></div>
-        <div class="opponent-area">
-            <div class="opponent-top" id="opponentTop">
-                <h2 id="opponentTopName"></h2>
-                <div class="hand opponent-hand" id="opponentTopHand"></div>
-            </div>
-        </div>
-        <div class="opponent-left" id="opponentLeft">
-            <h2 id="opponentLeftName"></h2>
-            <div class="hand opponent-hand" id="opponentLeftHand"></div>
-        </div>
-        <div class="opponent-right" id="opponentRight">
-            <h2 id="opponentRightName"></h2>
-            <div class="hand opponent-hand" id="opponentRightHand"></div>
-        </div>
+        <div class="opponents-container" id="opponentsContainer"></div>
         <div class="table-area" id="table"></div>
         <div class="deck-area">
             <div class="deck" id="deck"></div>
@@ -491,13 +459,8 @@
                 reconnectionDelay: 1000
             });
             const playerNameEl = document.getElementById('playerName');
-            const opponentTopNameEl = document.getElementById('opponentTopName');
-            const opponentLeftNameEl = document.getElementById('opponentLeftName');
-            const opponentRightNameEl = document.getElementById('opponentRightName');
+            const opponentsContainer = document.getElementById('opponentsContainer');
             const playerHandEl = document.getElementById('playerHand');
-            const opponentTopHandEl = document.getElementById('opponentTopHand');
-            const opponentLeftHandEl = document.getElementById('opponentLeftHand');
-            const opponentRightHandEl = document.getElementById('opponentRightHand');
             const tableEl = document.getElementById('table');
             const deckEl = document.getElementById('deck');
             const trumpCardEl = document.getElementById('trumpCard');
@@ -686,29 +649,17 @@
                 playerNameEl.textContent = `${player.name} (${player.id === currentAttacker ? t('you_are_attacker') : player.id === currentDefender ? t('you_are_defender') : 'You'})${player.isDisconnected ? ' (Disconnected)' : ''}`;
                 playerNameEl.classList.toggle('highlight', player.id === currentAttacker || player.id === currentDefender);
 
-                // Opponents (top, left, right)
-                const opponentElements = [
-                    { nameEl: opponentTopNameEl, handEl: opponentTopHandEl },
-                    { nameEl: opponentLeftNameEl, handEl: opponentLeftHandEl },
-                    { nameEl: opponentRightNameEl, handEl: opponentRightHandEl }
-                ];
-
-                opponents.forEach((opponent, index) => {
-                    if (index < 3) {
-                        const { nameEl, handEl } = opponentElements[index];
-                        nameEl.textContent = `${opponent.name}${opponent.id === currentAttacker ? ` (${t('opponent_attacker')})` : opponent.id === currentDefender ? ` (${t('opponent_defender')})` : ''}${opponent.isDisconnected ? ' (Disconnected)' : ''}`;
-                        nameEl.classList.toggle('highlight', opponent.id === currentAttacker || opponent.id === currentDefender);
-                        handEl.innerHTML = opponent.hand.map(() => renderCardBack()).join('');
-                    }
-                });
-
-                // Clear unused opponent slots
-                for (let i = opponents.length; i < 3; i++) {
-                    const { nameEl, handEl } = opponentElements[i];
-                    nameEl.textContent = t('opponent_waiting');
-                    nameEl.classList.remove('highlight');
-                    handEl.innerHTML = '';
-                }
+                // Dynamically render opponents
+                opponentsContainer.innerHTML = opponents.map((opponent, index) => `
+                    <div class="opponent-area" id="opponent-${index}">
+                        <h2 id="opponentName-${index}" class="${opponent.id === currentAttacker || opponent.id === currentDefender ? 'highlight' : ''}">
+                            ${opponent.name}${opponent.id === currentAttacker ? ` (${t('opponent_attacker')})` : opponent.id === currentDefender ? ` (${t('opponent_defender')})` : ''}${opponent.isDisconnected ? ' (Disconnected)' : ''}
+                        </h2>
+                        <div class="hand" id="opponentHand-${index}">
+                            ${opponent.hand.map(() => renderCardBack()).join('')}
+                        </div>
+                    </div>
+                `).join('');
 
                 // Player hand
                 playerHandEl.innerHTML = player.hand.map(card => {
