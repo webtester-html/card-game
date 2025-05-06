@@ -186,35 +186,38 @@
                 en: {
                     title: 'Durak Room',
                     roomCodeLabel: 'Room Code:',
-                    playerCountLabel: 'Players:',
+                    playerCountLabel: 'Players (Ready/Total):',
                     readyBtn: 'Ready',
                     readyWaiting: 'Ready (Waiting)',
                     leaveRoomBtn: 'Exit Room',
                     chatPlaceholder: 'Type a message...',
                     disconnected: 'disconnected',
-                    minPlayers: 'Need at least 2 ready players to start...'
+                    minPlayers: 'Need at least 2 ready players to start...',
+                    invalidData: 'Invalid room data received.'
                 },
                 uk: {
                     title: 'Кімната Дурак',
                     roomCodeLabel: 'Код кімнати:',
-                    playerCountLabel: 'Гравці:',
+                    playerCountLabel: 'Гравці (Готові/Всього):',
                     readyBtn: 'Готовий',
                     readyWaiting: 'Готовий (Очікування)',
                     leaveRoomBtn: 'Вийти з кімнати',
                     chatPlaceholder: 'Введіть повідомлення...',
                     disconnected: 'відключений',
-                    minPlayers: 'Потрібно щонайменше 2 готових гравці для початку...'
+                    minPlayers: 'Потрібно щонайменше 2 готових гравці для початку...',
+                    invalidData: 'Отримано некоректні дані кімнати.'
                 },
                 ru: {
                     title: 'Комната Дурак',
                     roomCodeLabel: 'Код комнаты:',
-                    playerCountLabel: 'Игроки:',
+                    playerCountLabel: 'Игроки (Готовы/Всего):',
                     readyBtn: 'Готов',
                     readyWaiting: 'Готов (Ожидание)',
                     leaveRoomBtn: 'Выйти из комнаты',
                     chatPlaceholder: 'Введите сообщение...',
                     disconnected: 'отключен',
-                    minPlayers: 'Нужно как минимум 2 готовых игрока для старта...'
+                    minPlayers: 'Нужно как минимум 2 готовых игрока для старта...',
+                    invalidData: 'Получены некорректные данные комнаты.'
                 }
             };
 
@@ -279,8 +282,8 @@
                     })
                     .then(data => {
                         console.log('room.html: HTTP fetch received:', data);
-                        if (data.error) {
-                            showError(data.error === 'Room not found' ? 'Room not found.' : 'An error occurred.');
+                        if (data.error || !data.players || !Array.isArray(data.players)) {
+                            showError(data.error === 'Room not found' ? 'Room not found.' : t('invalidData'));
                             if (isJoined && data.error === 'Room not found') {
                                 setTimeout(fetchRoomState, 2000);
                             } else {
@@ -291,14 +294,14 @@
                             }
                             return;
                         }
-                        playerList.innerHTML = data.players && data.players.length ? data.players.map(player => 
+                        playerList.innerHTML = data.players.length ? data.players.map(player => 
                             `<li class="${player.ready ? 'ready' : ''}">${player.name}${player.isDisconnected ? ` (${t('disconnected')})` : ''}</li>`
                         ).join('') : '<li>No players</li>';
                         playerCount.textContent = `${data.readyCount || 0}/${data.totalCount || 0}`;
                         if (data.readyCount < 2 && data.totalCount >= 2) {
                             showError(t('minPlayers'));
                         }
-                        const currentPlayer = data.players && data.players.find(p => p.name === playerName);
+                        const currentPlayer = data.players.find(p => p.name === playerName);
                         console.log('room.html: Current player check:', { playerName, currentPlayer });
                         if (currentPlayer) {
                             updateReadyButton(currentPlayer.ready, currentPlayer.isDisconnected);
@@ -378,7 +381,11 @@
 
             socket.on('updateRoom', ({ players, readyCount, totalCount }) => {
                 console.log('room.html: Received updateRoom:', { players, readyCount, totalCount });
-                playerList.innerHTML = players && players.length ? players.map(player => 
+                if (!players || !Array.isArray(players)) {
+                    showError(t('invalidData'));
+                    return;
+                }
+                playerList.innerHTML = players.length ? players.map(player => 
                     `<li class="${player.ready ? 'ready' : ''}">${player.name}${player.isDisconnected ? ` (${t('disconnected')})` : ''}</li>`
                 ).join('') : '<li>No players</li>';
                 playerCount.textContent = `${readyCount || 0}/${totalCount || 0}`;
