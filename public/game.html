@@ -32,6 +32,7 @@
             position: absolute;
             top: 10px;
             right: 10px;
+            z-index: 30;
         }
         .language-selector select {
             padding: 5px;
@@ -43,6 +44,7 @@
             text-align: center;
             position: absolute;
             bottom: 20px;
+            z-index: 20;
         }
         .opponents-container {
             width: 100%;
@@ -52,6 +54,7 @@
             position: absolute;
             top: 20px;
             gap: 20px;
+            z-index: 20;
         }
         .opponent-area {
             text-align: center;
@@ -63,7 +66,7 @@
             display: grid;
             grid-template-columns: repeat(6, 1fr);
             grid-auto-rows: auto;
-            gap: 5px;
+            gap: 8px;
             justify-items: center;
         }
         .player-area h2,
@@ -88,6 +91,7 @@
             background: rgba(0, 0, 0, 0.7);
             padding: 5px;
             border-radius: 4px;
+            z-index: 30;
         }
         .deck-area {
             position: absolute;
@@ -128,9 +132,10 @@
             justify-items: center;
             align-content: center;
             padding: 20px;
+            margin-left: 150px; /* Avoid overlap with deck */
             box-sizing: border-box;
             position: relative;
-            z-index: 20;
+            z-index: 25;
         }
         .card-pair {
             display: flex;
@@ -271,6 +276,7 @@
         @media (max-width: 768px) {
             .table-area {
                 grid-template-columns: repeat(4, 1fr);
+                margin-left: 120px;
             }
             .opponent-area .hand {
                 grid-template-columns: repeat(4, 1fr);
@@ -317,6 +323,7 @@
         @media (max-width: 480px) {
             .table-area {
                 grid-template-columns: repeat(3, 1fr);
+                margin-left: 100px;
             }
             .opponent-area .hand {
                 grid-template-columns: repeat(3, 1fr);
@@ -403,7 +410,7 @@
                 return_to_lobby: 'Return to Lobby',
                 you_win: 'You Win!',
                 you_lose: 'You Lose!',
-                waiting_reconnect: 'Waiting for players to reconnect...',
+                waiting_reconnect en: 'Waiting for players to reconnect...',
                 trump_card_error: 'Trump card not set properly.',
                 server_error: 'Failed to connect to server. Retrying...',
                 invalid_move: 'Invalid move! Please select a valid card.',
@@ -418,7 +425,8 @@
                 fetch_error: 'Failed to fetch game state.',
                 taking_cards: 'Taking cards...',
                 timeout_error: 'Action timed out. Retrying...',
-                invalid_card_data: 'Invalid card data received.'
+                invalid_card_data: 'Invalid card data received.',
+                player_disconnected: 'A player has disconnected. Waiting for reconnect...'
             },
             uk: {
                 title: 'Карткова гра',
@@ -446,7 +454,8 @@
                 fetch_error: 'Не вдалося отримати стан гри.',
                 taking_cards: 'Беремо карти...',
                 timeout_error: 'Час дії минув. Спробуємо ще раз...',
-                invalid_card_data: 'Отримано некоректні дані карти.'
+                invalid_card_data: 'Отримано некоректні дані карти.',
+                player_disconnected: 'Гравець відключений. Очікування повторного підключення...'
             },
             ru: {
                 title: 'Карточная игра',
@@ -474,7 +483,8 @@
                 fetch_error: 'Не удалось получить состояние игры.',
                 taking_cards: 'Берем карты...',
                 timeout_error: 'Время действия истекло. Пробуем снова...',
-                invalid_card_data: 'Получены некорректные данные карты.'
+                invalid_card_data: 'Получены некорректные данные карты.',
+                player_disconnected: 'Игрок отключился. Ожидание повторного подключения...'
             }
         };
 
@@ -510,6 +520,7 @@
             let takeCardsAttempts = 0;
             const maxTakeCardsAttempts = 3;
             let pendingDefenseCard = null;
+            let pendingDefenseTimeout = null;
 
             // Initialize language
             languageSelect.value = localStorage.getItem('language') || 'en';
@@ -621,19 +632,36 @@
             }
 
             function isValidAttackCard(card, table, trumpSuit) {
-                if (!isValidCard(card)) return false;
+                if (!isValidCard(card)) {
+                    console.warn('game.html: Invalid attack card:', card);
+                    return false;
+                }
                 if (!table || !Array.isArray(table) || table.length === 0) return true;
                 return table.some(pair => pair.attack && pair.attack.rank === card.rank);
             }
 
             function isValidDefenseCard(card, table, trumpSuit) {
-                if (!isValidCard(card)) return false;
-                if (!table || !Array.isArray(table)) return false;
+                if (!isValidCard(card)) {
+                    console.warn('game.html: Invalid defense card:', card);
+                    return false;
+                }
+                if (!table || !Array.isArray(table) || table.length === 0) {
+                    console.warn('game.html: Table empty or invalid for defense:', table);
+                    return false;
+                }
                 const lastAttack = table.find(pair => pair.attack && !pair.defense);
                 if (!lastAttack || !isValidCard(lastAttack.attack)) {
                     console.warn('game.html: No valid attack card found for defense:', table);
                     return false;
                 }
+                console.log('game.html: Validating defense card:', {
+                    card,
+                    lastAttack: lastAttack.attack,
+                    trumpSuit,
+                    sameSuit: card.suit === lastAttack.attack.suit,
+                    higherRank: rankOrder.indexOf(card.rank) > rankOrder.indexOf(lastAttack.attack.rank),
+                    isTrump: trumpSuit && card.suit === trumpSuit
+                });
                 if (card.suit === lastAttack.attack.suit) {
                     return rankOrder.indexOf(card.rank) > rankOrder.indexOf(lastAttack.attack.rank);
                 }
@@ -653,6 +681,14 @@
                     takeCardsTimeout = null;
                 }
                 takeCardsAttempts = 0;
+            }
+
+            function resetPendingDefense() {
+                if (pendingDefenseTimeout) {
+                    clearTimeout(pendingDefenseTimeout);
+                    pendingDefenseTimeout = null;
+                }
+                pendingDefenseCard = null;
             }
 
             function validateGameData(data) {
@@ -734,7 +770,7 @@
                     const isAttacker = player.id === currentAttacker;
                     const isDefender = player.id === currentDefender;
                     const isValidMove = isAttacker ? isValidAttackCard(card, table, trump ? trump.suit : null) : isDefender ? isValidDefenseCard(card, table, trump ? trump.suit : null) : false;
-                    console.log('game.html: Card validation:', { card, isAttacker, isDefender, isValidMove });
+                    console.log('game.html: Rendering card:', { card, isAttacker, isDefender, isValidMove, isDisconnected: player.isDisconnected, isTakingCards });
                     return renderCard(card, (isAttacker || isDefender) && isValidMove && !player.isDisconnected && !isTakingCards, isAttacker ? 'attack' : 'defend');
                 }).join('');
 
@@ -868,6 +904,7 @@
                 socket.removeAllListeners('gameOver');
                 socket.removeAllListeners('errorMessage');
                 socket.removeAllListeners('setPlayerId');
+                socket.removeAllListeners('roomDeleted');
 
                 socket.on('connect_error', (err) => {
                     console.log('game.html: Connection error:', err.message);
@@ -906,15 +943,15 @@
                 socket.on('updateGame', (data) => {
                     console.log('game.html: Received updateGame:', data);
                     resetTakeCardsState();
-                    pendingDefenseCard = null; // Clear pending card on update
+                    resetPendingDefense();
                     updateGameUI(data);
                 });
 
                 socket.on('gamePaused', ({ message }) => {
                     console.log('game.html: Game paused:', message);
-                    showError(t('waiting_reconnect'));
-                    const actionButtons = document.querySelectorAll('#endTurnBtn, #takeCardsBtn, .card');
-                    actionButtons.forEach(btn => btn.disabled = true);
+                    showError(t('player_disconnected'));
+                    const actionElements = document.querySelectorAll('#endTurnBtn, #takeCardsBtn, .card');
+                    actionElements.forEach(el => el.classList.add('disabled'));
                 });
 
                 socket.on('gameEnded', ({ winner }) => {
@@ -936,7 +973,7 @@
                 socket.on('errorMessage', (msg) => {
                     console.log('game.html: Error:', msg);
                     resetTakeCardsState();
-                    pendingDefenseCard = null; // Clear pending card on error
+                    resetPendingDefense();
                     updateGameUI(window.lastGameState || {}); // Re-render to reset card states
                     showError(msg);
                     if (msg.includes('Another session has taken over this player')) {
@@ -989,7 +1026,12 @@
             playerHandEl.addEventListener('click', (e) => {
                 const cardEl = e.target.closest('.card');
                 if (!cardEl || cardEl.classList.contains('disabled')) {
-                    console.warn('game.html: Card click blocked:', { disabled: cardEl?.classList.contains('disabled') });
+                    console.warn('game.html: Card click blocked:', {
+                        card: cardEl?.dataset,
+                        disabled: cardEl?.classList.contains('disabled'),
+                        isTakingCards,
+                        isDisconnected: window.lastGameState?.players?.find(p => p.name === playerName)?.isDisconnected
+                    });
                     showError(t('not_your_turn'));
                     return;
                 }
@@ -1006,6 +1048,12 @@
 
                 if (role === 'defend') {
                     pendingDefenseCard = { rank, suit };
+                    pendingDefenseTimeout = setTimeout(() => {
+                        console.warn('game.html: Pending defense card timed out:', pendingDefenseCard);
+                        resetPendingDefense();
+                        updateGameUI(window.lastGameState || {});
+                        showError(t('timeout_error'));
+                    }, 5000);
                     updateGameUI(JSON.parse(JSON.stringify(window.lastGameState || {}))); // Force re-render with pending card
                 }
 
@@ -1067,7 +1115,7 @@
                 window.lastGameState = data;
                 console.log('game.html: Received updateGame:', data);
                 resetTakeCardsState();
-                pendingDefenseCard = null;
+                resetPendingDefense();
                 updateGameUI(data);
             });
 
