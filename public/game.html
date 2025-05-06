@@ -168,6 +168,7 @@
             cursor: pointer;
             transition: transform 0.2s, border 0.2s;
             color: red;
+            pointer-events: auto;
         }
         .card:hover:not(.disabled) {
             transform: translateY(-5px);
@@ -175,6 +176,7 @@
         .card.disabled {
             opacity: 0.5;
             cursor: not-allowed;
+            pointer-events: none;
         }
         .card.pending {
             opacity: 0.7;
@@ -427,7 +429,8 @@
                 taking_cards: 'Taking cards...',
                 timeout_error: 'Action timed out. Retrying...',
                 invalid_card_data: 'Invalid card data received.',
-                player_disconnected: 'A player has disconnected. Waiting for reconnect...'
+                player_disconnected: 'A player has disconnected. Waiting for reconnect...',
+                click_detected: 'Card clicked!'
             },
             uk: {
                 title: 'Карткова гра',
@@ -456,14 +459,15 @@
                 taking_cards: 'Беремо карти...',
                 timeout_error: 'Час дії минув. Спробуємо ще раз...',
                 invalid_card_data: 'Отримано некоректні дані карти.',
-                player_disconnected: 'Гравець відключений. Очікування повторного підключення...'
+                player_disconnected: 'Гравець відключений. Очікування повторного підключення...',
+                click_detected: 'Карту натиснуто!'
             },
             ru: {
                 title: 'Карточная игра',
                 error_invalid_data: 'Недействительные данные игры. Пожалуйста, перезайдите в комнату.',
                 error_no_room: 'Комната не указана. Перенаправление в лобби...',
                 error_no_player: 'Имя игрока не найдено. Пожалуйста, перезайдите в комнату.',
-                error_session_taken: 'Этот игрок уже подключен с другой сессии. Пожалуйста, начните новую сессию.',
+                error_session_taken: 'Этот игрок уже подключен с другой сессии. Пожалуйста, начните новую сесию.',
                 end_turn: 'Завершить ход',
                 take_cards: 'Взять карты',
                 return_to_lobby: 'Вернуться в лобби',
@@ -485,7 +489,8 @@
                 taking_cards: 'Берем карты...',
                 timeout_error: 'Время действия истекло. Пробуем снова...',
                 invalid_card_data: 'Получены некорректные данные карты.',
-                player_disconnected: 'Игрок отключился. Ожидание повторного подключения...'
+                player_disconnected: 'Игрок отключился. Ожидание повторного подключения...',
+                click_detected: 'Карта нажата!'
             }
         };
 
@@ -520,11 +525,11 @@
             let takeCardsTimeout = null;
             let takeCardsAttempts = 0;
             const maxTakeCardsAttempts = 3;
-            let pendingDefenseCard = null;
             let pendingAttackCard = null;
-            let pendingActionTimeout = null;
+            let pendingDefenseCard = null;
             let reconnectAttempts = 0;
             const maxReconnectAttempts = 5;
+            let lastUpdateGame = null;
 
             // Initialize language
             languageSelect.value = localStorage.getItem('language') || 'en';
@@ -547,7 +552,7 @@
             const roomId = urlParams.get('room');
             let playerName = localStorage.getItem('playerName');
 
-            console.log('game.html: Initial data:', { roomId, playerName });
+            console.log('game.html: Initial data:', JSON.stringify({ roomId, playerName }));
 
             if (!roomId) {
                 console.error('game.html: No roomId provided');
@@ -566,7 +571,7 @@
             let playerId = localStorage.getItem('playerId');
 
             let joinAttemptCount = 0;
-            const maxJoinAttempts = 10;
+            const maxJoinAttempts = 5;
 
             const suitSymbols = {
                 Hearts: '♥',
@@ -649,11 +654,11 @@
                     return true;
                 }
                 const isValid = table.some(pair => pair.attack && pair.attack.rank === card.rank);
-                console.log('game.html: Validating attack card:', {
-                    card: JSON.stringify(card),
+                console.log('game.html: Validating attack card:', JSON.stringify({
+                    card,
                     tableRanks: table.map(pair => pair.attack?.rank).filter(Boolean),
                     isValid
-                });
+                }));
                 return isValid;
             }
 
@@ -668,26 +673,27 @@
                 }
                 const lastAttack = table.find(pair => pair.attack && !pair.defense);
                 if (!lastAttack || !isValidCard(lastAttack.attack)) {
-                    console.warn('game.html: No valid attack card found for defense:', table);
+                    console.warn('game.html: No valid attack card found for defense:', JSON.stringify(table));
                     return false;
                 }
                 const isValid = (card.suit === lastAttack.attack.suit && 
                                 rankOrder.indexOf(card.rank) > rankOrder.indexOf(lastAttack.attack.rank)) ||
                                (trumpSuit && card.suit === trumpSuit);
-                console.log('game.html: Validating defense card:', {
-                    card: JSON.stringify(card),
-                    lastAttack: JSON.stringify(lastAttack.attack),
+                console.log('game.html: Validating defense card:', JSON.stringify({
+                    card,
+                    lastAttack: lastAttack.attack,
                     trumpSuit,
                     sameSuit: card.suit === lastAttack.attack.suit,
                     higherRank: rankOrder.indexOf(card.rank) > rankOrder.indexOf(lastAttack.attack.rank),
                     isTrump: trumpSuit && card.suit === trumpSuit,
                     isValid
-                });
+                }));
                 return isValid;
             }
 
             function updateDebugInfo(state) {
-                debugInfoEl.textContent = `${t('title')} - Room: ${roomId}, Player: ${playerName}, ID: ${playerId || 'Not assigned'}, Players: ${state?.players?.length || 0}`;
+                const player = state?.players?.find(p => p.id === playerId);
+                debugInfoEl.textContent = `${t('title')} - Room: ${roomId}, Player: ${playerName}, ID: ${playerId || 'Not assigned'}, Attacker: ${state?.currentAttacker === playerId ? 'You' : 'Other'}, Cards: ${player?.hand?.length || 0}`;
             }
 
             function resetTakeCardsState() {
@@ -701,11 +707,7 @@
                 takeCardsAttempts = 0;
             }
 
-            function resetPendingAction() {
-                if (pendingActionTimeout) {
-                    clearTimeout(pendingActionTimeout);
-                    pendingActionTimeout = null;
-                }
+            function resetPendingCards() {
                 pendingAttackCard = null;
                 pendingDefenseCard = null;
             }
@@ -717,7 +719,7 @@
                     return false;
                 }
                 if (!data.table || !Array.isArray(data.table)) {
-                    console.warn('game.html: Invalid table data:', data.table);
+                    console.warn('game.html: Invalid table data:', JSON.stringify(data.table));
                     data.table = [];
                 }
                 if (!Number.isInteger(data.deckCount) || data.deckCount < 0) {
@@ -728,15 +730,20 @@
             }
 
             function updateGameUI(data) {
-                console.log('game.html: Updating UI with:', {
+                if (lastUpdateGame && JSON.stringify(data) === JSON.stringify(lastUpdateGame)) {
+                    console.log('game.html: Skipping duplicate updateGame');
+                    return;
+                }
+                lastUpdateGame = JSON.parse(JSON.stringify(data));
+                console.log('game.html: Updating UI with:', JSON.stringify({
                     playerCount: data.players?.length,
-                    trump: JSON.stringify(data.trump),
+                    trump: data.trump,
                     deckCount: data.deckCount,
                     tableSize: data.table?.length,
                     currentAttacker: data.currentAttacker,
                     currentDefender: data.currentDefender,
                     playerHand: data.players?.find(p => p.name === playerName)?.hand?.length
-                });
+                }));
 
                 if (!validateGameData(data)) {
                     setTimeout(() => {
@@ -755,7 +762,7 @@
                 const trump = data.trump;
 
                 if (!player) {
-                    console.error('game.html: Player not found:', { playerName, players: JSON.stringify(data.players) });
+                    console.error('game.html: Player not found:', JSON.stringify({ playerName, players: data.players }));
                     showError(t('error_invalid_data'));
                     setTimeout(() => {
                         localStorage.clear();
@@ -790,18 +797,27 @@
                     const isAttacker = player.id === currentAttacker;
                     const isDefender = player.id === currentDefender;
                     const isValidMove = isAttacker ? isValidAttackCard(card, table, trump ? trump.suit : null) : isDefender ? isValidDefenseCard(card, table, trump ? trump.suit : null) : false;
-                    console.log('game.html: Rendering card:', {
-                        card: JSON.stringify(card),
+                    console.log('game.html: Rendering card:', JSON.stringify({
+                        card,
                         isAttacker,
                         isDefender,
                         isValidMove,
                         isDisconnected: player.isDisconnected,
                         isTakingCards
-                    });
+                    }));
                     return renderCard(card, (isAttacker || isDefender) && isValidMove && !player.isDisconnected && !isTakingCards, isAttacker ? 'attack' : 'defend', 
                         (isAttacker && pendingAttackCard && pendingAttackCard.rank === card.rank && pendingAttackCard.suit === card.suit) ||
                         (isDefender && pendingDefenseCard && pendingDefenseCard.rank === card.rank && pendingDefenseCard.suit === card.suit));
                 }).join('');
+
+                // Add click listeners to cards
+                const cardEls = playerHandEl.querySelectorAll('.card');
+                cardEls.forEach(cardEl => {
+                    cardEl.removeEventListener('click', cardClickHandler);
+                    if (!cardEl.classList.contains('disabled')) {
+                        cardEl.addEventListener('click', cardClickHandler);
+                    }
+                });
 
                 // Render opponents
                 opponentsContainer.innerHTML = opponents.map((opponent, index) => {
@@ -868,7 +884,7 @@
             }
 
             function restorePlayerSession() {
-                console.log('game.html: Restoring session for:', { roomId, playerId, playerName });
+                console.log('game.html: Restoring session for:', JSON.stringify({ roomId, playerId, playerName }));
                 if (!roomId || !playerName) {
                     showError(t('error_invalid_data'));
                     setTimeout(() => window.location.href = '/', 2000);
@@ -897,7 +913,7 @@
                             socket.emit('reconnectPlayer', { roomId, playerId, playerName });
                             updateGameUI(data);
                         } else {
-                            console.error('game.html: Player not found in game:', { playerName });
+                            console.error('game.html: Player not found in game:', JSON.stringify({ playerName }));
                             showError(t('error_invalid_data'));
                             setTimeout(() => {
                                 localStorage.clear();
@@ -928,8 +944,54 @@
                     return;
                 }
                 joinAttemptCount++;
-                console.log('game.html: Attempting to join room', roomId, 'attempt', joinAttemptCount, 'playerId:', playerId);
+                console.log('game.html: Attempting to join room:', JSON.stringify({ roomId, attempt: joinAttemptCount, playerId }));
                 socket.emit('joinRoom', { roomId, playerName, playerId: playerId || '' });
+            }
+
+            function cardClickHandler(e) {
+                const cardEl = e.currentTarget;
+                console.log('game.html: Card clicked:', JSON.stringify({
+                    target: e.target.tagName,
+                    cardClasses: cardEl.classList.toString(),
+                    dataset: cardEl.dataset,
+                    isDisabled: cardEl.classList.contains('disabled'),
+                    isTakingCards,
+                    isDisconnected: window.lastGameState?.players?.find(p => p.name === playerName)?.isDisconnected
+                }));
+                alert(t('click_detected'));
+
+                if (cardEl.classList.contains('disabled')) {
+                    console.warn('game.html: Card click blocked: Disabled card');
+                    showError(t('not_your_turn'));
+                    return;
+                }
+
+                const rank = cardEl.dataset.rank || '';
+                const suit = cardEl.dataset.suit || '';
+                const role = cardEl.dataset.role || '';
+
+                if (!rank || !suit || !role || !rankOrder.includes(rank) || !Object.keys(suitSymbols).includes(suit)) {
+                    console.warn('game.html: Invalid card data:', JSON.stringify({ rank, suit, role }));
+                    showError(t('invalid_move'));
+                    return;
+                }
+
+                if (role === 'attack') {
+                    pendingAttackCard = { rank, suit };
+                } else if (role === 'defend') {
+                    pendingDefenseCard = { rank, suit };
+                }
+
+                console.log('game.html: Playing card:', JSON.stringify({ rank, suit, role, playerId }));
+                socket.emit('playCard', {
+                    roomId,
+                    playerName,
+                    playerId,
+                    card: { rank, suit },
+                    role
+                });
+
+                updateGameUI(JSON.parse(JSON.stringify(window.lastGameState || {})));
             }
 
             function setupSocketListeners() {
@@ -950,9 +1012,9 @@
                 });
 
                 socket.on('roomJoined', ({ roomId, playerId: newPlayerId, playerName: serverPlayerName }) => {
-                    console.log('game.html: Room joined:', { roomId, newPlayerId, serverPlayerName });
+                    console.log('game.html: Room joined:', JSON.stringify({ roomId, newPlayerId, serverPlayerName }));
                     if (serverPlayerName !== playerName) {
-                        console.error('game.html: Player name mismatch:', { expected: playerName, received: serverPlayerName });
+                        console.error('game.html: Player name mismatch:', JSON.stringify({ expected: playerName, received: serverPlayerName }));
                         showError(t('error_invalid_data'));
                         setTimeout(() => {
                             localStorage.clear();
@@ -969,7 +1031,7 @@
                 });
 
                 socket.on('startGame', ({ trump, currentAttacker, currentDefender }) => {
-                    console.log('game.html: Received startGame:', { trump: JSON.stringify(trump), currentAttacker, currentDefender });
+                    console.log('game.html: Received startGame:', JSON.stringify({ trump, currentAttacker, currentDefender }));
                     if (trump && isValidCard(trump.card)) {
                         trumpCardEl.innerHTML = renderCard(trump.card, false);
                         console.log('game.html: Trump card set on startGame:', JSON.stringify(trump.card));
@@ -983,7 +1045,7 @@
                     console.log('game.html: Received updateGame:', JSON.stringify(data));
                     window.lastGameState = data;
                     resetTakeCardsState();
-                    resetPendingAction();
+                    resetPendingCards();
                     updateGameUI(data);
                 });
 
@@ -1013,7 +1075,7 @@
                 socket.on('errorMessage', (msg) => {
                     console.log('game.html: Error:', msg);
                     resetTakeCardsState();
-                    resetPendingAction();
+                    resetPendingCards();
                     updateGameUI(window.lastGameState || {});
                     showError(msg);
                     if (msg.includes('Another session has taken over this player')) {
@@ -1064,60 +1126,12 @@
                 localStorage.setItem('roomId', roomId);
             });
 
-            playerHandEl.addEventListener('click', (e) => {
-                const cardEl = e.target.closest('.card');
-                if (!cardEl || cardEl.classList.contains('disabled')) {
-                    console.warn('game.html: Card click blocked:', {
-                        card: cardEl?.dataset,
-                        disabled: cardEl?.classList.contains('disabled'),
-                        isTakingCards,
-                        isDisconnected: window.lastGameState?.players?.find(p => p.name === playerName)?.isDisconnected
-                    });
-                    showError(t('not_your_turn'));
-                    return;
-                }
-
-                const rank = cardEl.dataset.rank;
-                const suit = cardEl.dataset.suit;
-                const role = cardEl.dataset.role;
-
-                if (!rank || !suit || !role || !rankOrder.includes(rank) || !Object.keys(suitSymbols).includes(suit)) {
-                    console.warn('game.html: Invalid card data:', { rank, suit, role });
-                    showError(t('invalid_move'));
-                    return;
-                }
-
-                if (role === 'attack') {
-                    pendingAttackCard = { rank, suit };
-                } else if (role === 'defend') {
-                    pendingDefenseCard = { rank, suit };
-                }
-
-                pendingActionTimeout = setTimeout(() => {
-                    console.warn('game.html: Card action timed out:', { rank, suit, role });
-                    resetPendingAction();
-                    updateGameUI(window.lastGameState || {});
-                    showError(t('timeout_error'));
-                }, 5000);
-
-                console.log('game.html: Playing card:', { rank, suit, role, playerId });
-                socket.emit('playCard', {
-                    roomId,
-                    playerName,
-                    playerId,
-                    card: { rank, suit },
-                    role
-                });
-
-                updateGameUI(JSON.parse(JSON.stringify(window.lastGameState || {})));
-            });
-
             endTurnBtn.addEventListener('click', () => {
                 if (isTakingCards) {
                     console.warn('game.html: End turn blocked: taking cards in progress');
                     return;
                 }
-                console.log('game.html: Ending turn for player:', { playerId, playerName });
+                console.log('game.html: Ending turn for player:', JSON.stringify({ playerId, playerName }));
                 socket.emit('endTurn', { roomId, playerId, playerName });
             });
 
@@ -1134,7 +1148,7 @@
                     return;
                 }
 
-                console.log('game.html: Taking cards for player:', { playerId, playerName, roomId });
+                console.log('game.html: Taking cards for player:', JSON.stringify({ playerId, playerName, roomId }));
                 isTakingCards = true;
                 takeCardsBtn.disabled = true;
                 takeCardsBtn.textContent = t('taking_cards');
