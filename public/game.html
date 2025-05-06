@@ -132,7 +132,7 @@
             justify-items: center;
             align-content: center;
             padding: 20px;
-            margin-left: 150px; /* Avoid overlap with deck */
+            margin-left: 150px;
             box-sizing: border-box;
             position: relative;
             z-index: 25;
@@ -410,7 +410,7 @@
                 return_to_lobby: 'Return to Lobby',
                 you_win: 'You Win!',
                 you_lose: 'You Lose!',
-                waiting_reconnect en: 'Waiting for players to reconnect...',
+                waiting_reconnect: 'Waiting for players to reconnect...',
                 trump_card_error: 'Trump card not set properly.',
                 server_error: 'Failed to connect to server. Retrying...',
                 invalid_move: 'Invalid move! Please select a valid card.',
@@ -521,6 +521,8 @@
             const maxTakeCardsAttempts = 3;
             let pendingDefenseCard = null;
             let pendingDefenseTimeout = null;
+            let reconnectAttempts = 0;
+            const maxReconnectAttempts = 5;
 
             // Initialize language
             languageSelect.value = localStorage.getItem('language') || 'en';
@@ -710,12 +712,13 @@
 
             function updateGameUI(data) {
                 console.log('game.html: Updating UI with:', {
-                    playerCount: data.players.length,
+                    playerCount: data.players?.length,
                     trump: data.trump,
                     deckCount: data.deckCount,
-                    tableSize: data.table.length,
+                    tableSize: data.table?.length,
                     currentAttacker: data.currentAttacker,
-                    currentDefender: data.currentDefender
+                    currentDefender: data.currentDefender,
+                    playerHand: data.players?.find(p => p.name === playerName)?.hand?.length
                 });
 
                 if (!validateGameData(data)) {
@@ -879,6 +882,15 @@
                     .catch(err => {
                         console.error('game.html: Fetch error:', err);
                         showError(t('fetch_error'));
+                        if (reconnectAttempts < maxReconnectAttempts) {
+                            reconnectAttempts++;
+                            console.log('game.html: Retrying reconnect, attempt:', reconnectAttempts);
+                            setTimeout(restorePlayerSession, 2000);
+                        } else {
+                            console.error('game.html: Max reconnect attempts reached');
+                            showError(t('server_error'));
+                            setTimeout(() => window.location.href = '/', 2000);
+                        }
                     });
             }
 
@@ -926,6 +938,7 @@
                     localStorage.setItem('playerId', playerId);
                     localStorage.setItem('playerName', playerName);
                     localStorage.setItem('roomId', roomId);
+                    reconnectAttempts = 0;
                     updateDebugInfo();
                 });
 
@@ -942,6 +955,7 @@
 
                 socket.on('updateGame', (data) => {
                     console.log('game.html: Received updateGame:', data);
+                    window.lastGameState = data;
                     resetTakeCardsState();
                     resetPendingDefense();
                     updateGameUI(data);
@@ -974,7 +988,7 @@
                     console.log('game.html: Error:', msg);
                     resetTakeCardsState();
                     resetPendingDefense();
-                    updateGameUI(window.lastGameState || {}); // Re-render to reset card states
+                    updateGameUI(window.lastGameState || {});
                     showError(msg);
                     if (msg.includes('Another session has taken over this player')) {
                         showError(t('error_session_taken'));
@@ -1006,6 +1020,7 @@
             socket.on('connect', () => {
                 console.log('game.html: Socket connected:', socket.id);
                 joinAttemptCount = 0;
+                reconnectAttempts = 0;
                 if (!roomId || !playerName) {
                     restorePlayerSession();
                     return;
@@ -1054,7 +1069,7 @@
                         updateGameUI(window.lastGameState || {});
                         showError(t('timeout_error'));
                     }, 5000);
-                    updateGameUI(JSON.parse(JSON.stringify(window.lastGameState || {}))); // Force re-render with pending card
+                    updateGameUI(JSON.parse(JSON.stringify(window.lastGameState || {})));
                 }
 
                 console.log('game.html: Playing card:', { rank, suit, role, playerId });
@@ -1108,15 +1123,6 @@
                 console.log('game.html: Returning to lobby');
                 socket.emit('leaveGame', { roomId, playerId, playerName });
                 window.location.href = '/';
-            });
-
-            // Store last game state for pending card rendering
-            socket.on('updateGame', (data) => {
-                window.lastGameState = data;
-                console.log('game.html: Received updateGame:', data);
-                resetTakeCardsState();
-                resetPendingDefense();
-                updateGameUI(data);
             });
 
             // Initial setup
