@@ -59,6 +59,13 @@
             min-width: 150px;
             max-width: 250px;
         }
+        .opponent-area .hand {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            grid-auto-rows: auto;
+            gap: 5px;
+            justify-items: center;
+        }
         .player-area h2,
         .opponent-area h2 {
             margin: 10px 0;
@@ -90,6 +97,7 @@
             display: flex;
             flex-direction: column;
             align-items: center;
+            z-index: 10;
         }
         .deck {
             position: relative;
@@ -121,6 +129,8 @@
             align-content: center;
             padding: 20px;
             box-sizing: border-box;
+            position: relative;
+            z-index: 20;
         }
         .card-pair {
             display: flex;
@@ -262,6 +272,9 @@
             .table-area {
                 grid-template-columns: repeat(4, 1fr);
             }
+            .opponent-area .hand {
+                grid-template-columns: repeat(4, 1fr);
+            }
             .card {
                 width: 80px;
                 height: 112px;
@@ -303,6 +316,9 @@
         }
         @media (max-width: 480px) {
             .table-area {
+                grid-template-columns: repeat(3, 1fr);
+            }
+            .opponent-area .hand {
                 grid-template-columns: repeat(3, 1fr);
             }
             .card {
@@ -437,7 +453,7 @@
                 error_invalid_data: 'Недействительные данные игры. Пожалуйста, перезайдите в комнату.',
                 error_no_room: 'Комната не указана. Перенаправление в лобби...',
                 error_no_player: 'Имя игрока не найдено. Пожалуйста, перезайдите в комнату.',
-                error_session_taken: 'Этот игрок уже подключен с другой сессии. Пожалуйста, начните новую сесию.',
+                error_session_taken: 'Этот игрок уже подключен с другой сессии. Пожалуйста, начните новую сессию.',
                 end_turn: 'Завершить ход',
                 take_cards: 'Взять карты',
                 return_to_lobby: 'Вернуться в лобби',
@@ -614,7 +630,10 @@
                 if (!isValidCard(card)) return false;
                 if (!table || !Array.isArray(table)) return false;
                 const lastAttack = table.find(pair => pair.attack && !pair.defense);
-                if (!lastAttack || !isValidCard(lastAttack.attack)) return false;
+                if (!lastAttack || !isValidCard(lastAttack.attack)) {
+                    console.warn('game.html: No valid attack card found for defense:', table);
+                    return false;
+                }
                 if (card.suit === lastAttack.attack.suit) {
                     return rankOrder.indexOf(card.rank) > rankOrder.indexOf(lastAttack.attack.rank);
                 }
@@ -715,6 +734,7 @@
                     const isAttacker = player.id === currentAttacker;
                     const isDefender = player.id === currentDefender;
                     const isValidMove = isAttacker ? isValidAttackCard(card, table, trump ? trump.suit : null) : isDefender ? isValidDefenseCard(card, table, trump ? trump.suit : null) : false;
+                    console.log('game.html: Card validation:', { card, isAttacker, isDefender, isValidMove });
                     return renderCard(card, (isAttacker || isDefender) && isValidMove && !player.isDisconnected && !isTakingCards, isAttacker ? 'attack' : 'defend');
                 }).join('');
 
@@ -727,7 +747,7 @@
                                 ${opponent.name}${opponent.id === currentAttacker ? ` (${t('opponent_attacker')})` : opponent.id === currentDefender ? ` (${t('opponent_defender')})` : ''}${opponent.isDisconnected ? ' (Disconnected)' : ''}
                             </h2>
                             <div class="hand" id="opponentHand-${index}">
-                                ${opponentHand.map(() => renderCardBack()).join('')}
+                                ${opponentHand.length > 0 ? opponentHand.map(() => renderCardBack()).join('') : renderCardBack()}
                             </div>
                         </div>
                     `;
@@ -917,13 +937,14 @@
                     console.log('game.html: Error:', msg);
                     resetTakeCardsState();
                     pendingDefenseCard = null; // Clear pending card on error
+                    updateGameUI(window.lastGameState || {}); // Re-render to reset card states
+                    showError(msg);
                     if (msg.includes('Another session has taken over this player')) {
                         showError(t('error_session_taken'));
                         localStorage.clear();
                         setTimeout(() => window.location.href = '/', 2000);
                         return;
                     }
-                    showError(msg);
                     if (msg.includes('Room does not exist') || msg.includes('Game room does not exist') || msg.includes('Player not found')) {
                         localStorage.clear();
                         setTimeout(() => window.location.href = '/', 2000);
@@ -968,6 +989,7 @@
             playerHandEl.addEventListener('click', (e) => {
                 const cardEl = e.target.closest('.card');
                 if (!cardEl || cardEl.classList.contains('disabled')) {
+                    console.warn('game.html: Card click blocked:', { disabled: cardEl?.classList.contains('disabled') });
                     showError(t('not_your_turn'));
                     return;
                 }
