@@ -1,4 +1,3 @@
-// Подключение необходимых модулей
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
@@ -9,7 +8,6 @@ const { v4: uuidv4 } = require('uuid');
 const cron = require('node-cron');
 const axios = require('axios');
 
-// Инициализация приложения Express и HTTP-сервера
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
@@ -20,7 +18,6 @@ const io = socketIo(server, {
     }
 });
 
-// Настройка переменных окружения
 const PORT = process.env.PORT || 3000;
 const dbPath = path.join('/tmp', 'durak_game.db');
 const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
@@ -48,7 +45,7 @@ function checkDatabasePermissions() {
 }
 checkDatabasePermissions();
 
-// Инициализация базы данных SQLite
+// Инициализация базы данных SQLite с обработкой ошибок
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
         console.error('Failed to connect to SQLite database:', err.message);
@@ -87,7 +84,7 @@ function initDatabase() {
 
         // Создание таблицы rooms
         db.run(`
-            CREATE TABLE rooms (
+            CREATE TABLE IF NOT EXISTS rooms (
                 roomId TEXT PRIMARY KEY,
                 trump TEXT,
                 deck TEXT,
@@ -109,7 +106,7 @@ function initDatabase() {
 
         // Создание таблицы players
         db.run(`
-            CREATE TABLE players (
+            CREATE TABLE IF NOT EXISTS players (
                 id TEXT PRIMARY KEY,
                 roomId TEXT,
                 playerId TEXT UNIQUE,
@@ -133,9 +130,9 @@ function initDatabase() {
             }
         });
 
-        // Создание таблицы game_history для хранения истории ходов
+        // Создание таблицы game_history
         db.run(`
-            CREATE TABLE game_history (
+            CREATE TABLE IF NOT EXISTS game_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 roomId TEXT,
                 playerId TEXT,
@@ -205,7 +202,7 @@ function cleanupOldRooms() {
         }
     });
 }
-cron.schedule('0 * * * *', cleanupOldRooms); // Каждый час
+cron.schedule('0 * * * *', cleanupOldRooms);
 
 // Функции санитизации ввода
 function sanitizeInput(input) {
@@ -742,15 +739,21 @@ function drawCards(roomId, playerIds, callback) {
         if (row.gameEnded) return;
         let deck = row.deck ? JSON.parse(row.deck) : [];
         let updates = [];
+        let completed = 0;
         playerIds.forEach(playerId => {
             db.get('SELECT hand, isDisconnected FROM players WHERE playerId = ?', [playerId], (err, player) => {
-                if (err || !player || player.isDisconnected) return;
+                if (err || !player || player.isDisconnected) {
+                    completed++;
+                    if (completed === playerIds.length) callback();
+                    return;
+                }
                 let hand = player.hand ? JSON.parse(player.hand) : [];
                 while (hand.length < 6 && deck.length > 0) {
                     hand.push(deck.shift());
                 }
                 updates.push({ id: playerId, hand });
-                if (updates.length === playerIds.length) {
+                completed++;
+                if (completed === playerIds.length) {
                     updates.forEach(update => {
                         db.run('UPDATE players SET hand = ? WHERE playerId = ?', [JSON.stringify(update.hand), update.id], err => {
                             if (err) {
@@ -998,7 +1001,7 @@ io.on('connection', (socket) => {
                         }
                         db.run('DELETE FROM players WHERE id = ?', [socket.id]);
                         db.get('SELECT COUNT(*) as count FROM players WHERE roomId = ?', [sanitizedRoomId], (err, row) => {
-                            if (row.count >= 4) {
+                            if (err || row.count >= 4) {
                                 socket.emit('errorMessage', 'Room is full');
                                 socket.emit('setPlayerId', sanitizedPlayerId);
                                 console.log(`Room ${sanitizedRoomId} is full`);
@@ -1380,7 +1383,7 @@ io.on('connection', (socket) => {
                     console.log(`Player ${sanitizedPlayerId} is not defender`);
                     return;
                 }
-                const hasUndefended = table.some(pair => !pair.defense);
+                const hasUndefended = table.some(pair => pair.attack && !pair.defense);
                 if (hasUndefended) {
                     db.all('SELECT playerId, name, hand, isDisconnected, socketIds FROM players WHERE roomId = ?', [sanitizedRoomId], (err, players) => {
                         if (err) {
@@ -1396,7 +1399,7 @@ io.on('connection', (socket) => {
                         }
                         let defenderHand = defender.hand ? JSON.parse(defender.hand) : [];
                         table.forEach(pair => {
-                            defenderHand.push(pair.attack);
+                            if (pair.attack) defenderHand.push(pair.attack);
                             if (pair.defense) defenderHand.push(pair.defense);
                         });
                         db.run('UPDATE players SET hand = ? WHERE playerId = ?', [JSON.stringify(defenderHand), defender.playerId], err => {
