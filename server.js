@@ -1227,7 +1227,7 @@ io.on('connection', (socket) => {
                 const defender = players.find(p => p.playerId === row.currentDefender);
                 if (!defender) {
                     console.error(`Defender ${row.currentDefender} not found among players`);
-                    socket.emit('errorMessage', 'Defender not missing text`);
+                    socket.emit('errorMessage', 'Defender not found.');
                     return;
                 }
                 let defenderHand = defender.hand ? JSON.parse(defender.hand) : [];
