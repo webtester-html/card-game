@@ -1091,90 +1091,89 @@ io.on('connection', (socket) => {
     });
 
     socket.on('playCard', async ({ roomId, playerName, playerId, card, role }) => {
-        roomId = sanitizeInput(roomId);
-        playerName = sanitizeInput(playerName);
-        playerId = sanitizeInput(playerId);
-        console.log(`Player ${playerName} (${role}) played card ${card.rank} of ${card.suit} in room ${roomId}, socket=${socket.id}`);
-        try {
-            const roomResult = await pool.query(
-                'SELECT trump, gameTable, currentAttacker, currentDefender, gameEnded FROM rooms WHERE roomId = $1',
-                [roomId]
-            );
-            const row = roomResult.rows[0];
-            if (!row) {
-                socket.emit('errorMessage', 'Game room does not exist.');
-                return;
-            }
-            if (row.gameEnded) {
-                console.log(`Room ${roomId} has ended, rejecting playCard action`);
-                socket.emit('errorMessage', 'Game has ended.');
-                return;
-            }
-            const trump = row.trump ? JSON.parse(row.trump).suit : null;
-            let table = row.gameTable ? JSON.parse(row.gameTable) : [];
-            const playerResult = await pool.query(
-                'SELECT id, isDisconnected, hand, socketIds FROM players WHERE roomId = $1 AND playerId = $2',
-                [roomId, playerId]
-            );
-            const player = playerResult.rows[0];
-            if (!player) {
-                console.error('Player not found');
-                socket.emit('errorMessage', 'Player not found.');
-                return;
-            }
-            if (player.isDisconnected) {
-                socket.emit('errorMessage', 'Cannot play cards while disconnected.');
-                return;
-            }
-            const isAttacker = playerId === row.currentAttacker;
-            const isDefender = playerId === row.currentDefender;
-
-            if (role === 'attack' && !isAttacker) {
-                socket.emit('errorMessage', 'Not your turn to attack.');
-                return;
-            }
-            if (role === 'defend' && !isDefender) {
-                socket.emit('errorMessage', 'Not your turn to defend.');
-                return;
-            }
-
-            let hand = player.hand ? JSON.parse(player.hand) : [];
-            const cardIndex = hand.findIndex(c => c.rank === card.rank && c.suit === card.suit);
-            if (cardIndex === -1) {
-                socket.emit('errorMessage', 'Invalid card.');
-                return;
-            }
-
-            if (role === 'attack') {
-                if (!isValidAttackCard(card, table, trump) || table.length >= 12) {
-                    socket.emit(' ContiType="text/javascript">
-                    'errorMessage', 'Invalid attack card.');
-                    return;
-                }
-                table.push({ attack: card, defense: null });
-            } else if (role === 'defend') {
-                const lastAttack = table.find(pair => !pair.defense);
-                if (!lastAttack) {
-                    socket.emit('errorMessage', 'No attack card to defend against.');
-                    return;
-                }
-                if (!isValidDefenseCard(card, lastAttack.attack, trump)) {
-                    socket.emit('errorMessage', 'Invalid defense card.');
-                    return;
-                }
-                lastAttack.defense = card;
-            }
-
-            hand.splice(cardIndex, 1);
-            await pool.query('UPDATE players SET hand = $1 WHERE playerId = $2', [JSON.stringify(hand), playerId]);
-            await pool.query('UPDATE rooms SET gameTable = $1, lastActivity = $2 WHERE roomId = $3', [JSON.stringify(table), Date.now(), roomId]);
-            await updateGameState(roomId);
-            await checkGameEnd(roomId);
-        } catch (err) {
-            console.error('Error playing card:', err.message);
-            socket.emit('errorMessage', 'Server error.');
+    roomId = sanitizeInput(roomId);
+    playerName = sanitizeInput(playerName);
+    playerId = sanitizeInput(playerId);
+    console.log(`Player ${playerName} (${role}) played card ${card.rank} of ${card.suit} in room ${roomId}, socket=${socket.id}`);
+    try {
+        const roomResult = await pool.query(
+            'SELECT trump, gameTable, currentAttacker, currentDefender, gameEnded FROM rooms WHERE roomId = $1',
+            [roomId]
+        );
+        const row = roomResult.rows[0];
+        if (!row) {
+            socket.emit('errorMessage', 'Game room does not exist.');
+            return;
         }
-    });
+        if (row.gameEnded) {
+            console.log(`Room ${roomId} has ended, rejecting playCard action`);
+            socket.emit('errorMessage', 'Game has ended.');
+            return;
+        }
+        const trump = row.trump ? JSON.parse(row.trump).suit : null;
+        let table = row.gameTable ? JSON.parse(row.gameTable) : [];
+        const playerResult = await pool.query(
+            'SELECT id, isDisconnected, hand, socketIds FROM players WHERE roomId = $1 AND playerId = $2',
+            [roomId, playerId]
+        );
+        const player = playerResult.rows[0];
+        if (!player) {
+            console.error('Player not found');
+            socket.emit('errorMessage', 'Player not found.');
+            return;
+        }
+        if (player.isDisconnected) {
+            socket.emit('errorMessage', 'Cannot play cards while disconnected.');
+            return;
+        }
+        const isAttacker = playerId === row.currentAttacker;
+        const isDefender = playerId === row.currentDefender;
+
+        if (role === 'attack' && !isAttacker) {
+            socket.emit('errorMessage', 'Not your turn to attack.');
+            return;
+        }
+        if (role === 'defend' && !isDefender) {
+            socket.emit('errorMessage', 'Not your turn to defend.');
+            return;
+        }
+
+        let hand = player.hand ? JSON.parse(player.hand) : [];
+        const cardIndex = hand.findIndex(c => c.rank === card.rank && c.suit === card.suit);
+        if (cardIndex === -1) {
+            socket.emit('errorMessage', 'Invalid card.');
+            return;
+        }
+
+        if (role === 'attack') {
+            if (!isValidAttackCard(card, table, trump) || table.length >= 12) {
+                socket.emit('errorMessage', 'Invalid attack card.');
+                return;
+            }
+            table.push({ attack: card, defense: null });
+        } else if (role === 'defend') {
+            const lastAttack = table.find(pair => !pair.defense);
+            if (!lastAttack) {
+                socket.emit('errorMessage', 'No attack card to defend against.');
+                return;
+            }
+            if (!isValidDefenseCard(card, lastAttack.attack, trump)) {
+                socket.emit('errorMessage', 'Invalid defense card.');
+                return;
+            }
+            lastAttack.defense = card;
+        }
+
+        hand.splice(cardIndex, 1);
+        await pool.query('UPDATE players SET hand = $1 WHERE playerId = $2', [JSON.stringify(hand), playerId]);
+        await pool.query('UPDATE rooms SET gameTable = $1, lastActivity = $2 WHERE roomId = $3', [JSON.stringify(table), Date.now(), roomId]);
+        await updateGameState(roomId);
+        await checkGameEnd(roomId);
+    } catch (err) {
+        console.error('Error playing card:', err.message);
+        socket.emit('errorMessage', 'Server error.');
+    }
+});
 
     socket.on('endTurn', async ({ roomId, playerId, playerName }) => {
         roomId = sanitizeInput(roomId);
