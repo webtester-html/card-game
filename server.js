@@ -1,13 +1,18 @@
 // server.js
-// Онлайн-игра Durak, адаптированная для развертывания на Render с PostgreSQL
+// Онлайн-игра Durak, адаптированная для SQLite на Render
 // Исправлена кнопка "Take Cards", файлы обслуживаются из папки public
 
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
-const { Pool } = require('pg'); // PostgreSQL клиент
+const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+
+// Конфигурация порта, URL и пути к базе данных
+const PORT = process.env.PORT || 3000;
+const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
+const dbPath = path.join('/tmp', 'durak_game.db');
 
 // Инициализация Express и HTTP-сервера
 const app = express();
@@ -21,88 +26,85 @@ const io = socketIo(server, {
     }
 });
 
-// Конфигурация порта и базы данных
-const PORT = process.env.PORT || 3000;
-const DATABASE_URL = process.env.DATABASE_URL;
-
-// Инициализация пула подключений к PostgreSQL
-const pool = new Pool({
-    connectionString: DATABASE_URL,
-    ssl: {
-        rejectUnauthorized: false // Необходим для Render PostgreSQL
-    },
-    max: 20, // Максимальное количество подключений в пуле
-    idleTimeoutMillis: 30000, // Время простоя перед закрытием соединения
-    connectionTimeoutMillis: 2000 // Таймаут подключения
+// Инициализация SQLite базы данных
+const db = new sqlite3.Database(dbPath, (err) => {
+    if (err) {
+        console.error('Ошибка подключения к SQLite:', err.message);
+        process.exit(1);
+    }
+    console.log(`Подключено к базе данных SQLite: ${dbPath}`);
 });
 
-// Проверка подключения к базе данных
-async function checkDatabaseConnection() {
-    try {
-        const client = await pool.connect();
-        console.log('Успешное подключение к базе данных PostgreSQL');
-        client.release();
-    } catch (err) {
-        console.error('Ошибка подключения к базе данных:', err.message);
-        process.exit(1);
-    }
-}
-checkDatabaseConnection();
-
 // Инициализация схемы базы данных
-async function initDatabase() {
-    try {
-        console.log('Инициализация базы данных...');
-        // Удаление существующих таблиц
-        await pool.query('DROP TABLE IF EXISTS players CASCADE');
-        await pool.query('DROP TABLE IF EXISTS rooms CASCADE');
+function initDatabase() {
+    return new Promise((resolve, reject) => {
+        console.log('Инициализация базы данных SQLite...');
+        db.serialize(() => {
+            // Удаление существующих таблиц
+            db.run('DROP TABLE IF EXISTS players', (err) => {
+                if (err) reject(err);
+            });
+            db.run('DROP TABLE IF EXISTS rooms', (err) => {
+                if (err) reject(err);
+            });
 
-        // Создание таблицы rooms
-        await pool.query(`
-            CREATE TABLE rooms (
-                roomId TEXT PRIMARY KEY,
-                trump JSONB,
-                deck JSONB,
-                gameTable JSONB,
-                currentAttacker TEXT,
-                currentDefender TEXT,
-                createdAt BIGINT,
-                lastActivity BIGINT,
-                activePlayers INTEGER DEFAULT 0,
-                gameEnded BOOLEAN DEFAULT FALSE
-            )
-        `);
-        console.log('Таблица rooms создана');
+            // Создание таблицы rooms
+            db.run(`
+                CREATE TABLE rooms (
+                    roomId TEXT PRIMARY KEY,
+                    trump TEXT,
+                    deck TEXT,
+                    gameTable TEXT,
+                    currentAttacker TEXT,
+                    currentDefender TEXT,
+                    createdAt INTEGER,
+                    lastActivity INTEGER,
+                    activePlayers INTEGER DEFAULT 0,
+                    gameEnded BOOLEAN DEFAULT FALSE
+                )
+            `, (err) => {
+                if (err) reject(err);
+                else console.log('Таблица rooms создана');
+            });
 
-        // Создание таблицы players
-        await pool.query(`
-            CREATE TABLE players (
-                id TEXT PRIMARY KEY,
-                roomId TEXT,
-                playerId TEXT UNIQUE,
-                name TEXT,
-                ready BOOLEAN DEFAULT FALSE,
-                hand JSONB,
-                joinedAt BIGINT,
-                isDisconnected BOOLEAN DEFAULT FALSE,
-                lastDisconnectedAt BIGINT,
-                language TEXT DEFAULT 'en',
-                socketIds JSONB DEFAULT '[]',
-                FOREIGN KEY (roomId) REFERENCES rooms (roomId) ON DELETE CASCADE
-            )
-        `);
-        console.log('Таблица players создана');
+            // Создание таблицы players
+            db.run(`
+                CREATE TABLE players (
+                    id TEXT PRIMARY KEY,
+                    roomId TEXT,
+                    playerId TEXT UNIQUE,
+                    name TEXT,
+                    ready BOOLEAN DEFAULT FALSE,
+                    hand TEXT,
+                    joinedAt INTEGER,
+                    isDisconnected BOOLEAN DEFAULT FALSE,
+                    lastDisconnectedAt INTEGER,
+                    language TEXT DEFAULT 'en',
+                    socketIds TEXT DEFAULT '[]',
+                    FOREIGN KEY (roomId) REFERENCES rooms (roomId) ON DELETE CASCADE
+                )
+            `, (err) => {
+                if (err) reject(err);
+                else console.log('Таблица players создана');
+            });
 
-        // Очистка таблиц для чистого старта
-        await pool.query('DELETE FROM rooms');
-        await pool.query('DELETE FROM players');
-        console.log('Таблицы очищены');
-    } catch (err) {
-        console.error('Ошибка инициализации базы данных:', err.message);
-        process.exit(1);
-    }
+            // Очистка таблиц
+            db.run('DELETE FROM rooms', (err) => {
+                if (err) reject(err);
+            });
+            db.run('DELETE FROM players', (err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
+    });
 }
-initDatabase();
+
+// Запуск инициализации базы данных
+initDatabase().catch(err => {
+    console.error('Ошибка инициализации базы данных:', err.message);
+    process.exit(1);
+});
 
 // Настройка Express для обслуживания статических файлов из папки public
 app.use(express.static(path.join(__dirname, 'public'), {
@@ -133,51 +135,41 @@ app.get('/game', (req, res) => {
 });
 
 // API для получения состояния комнаты
-app.get('/room/:roomId', async (req, res) => {
+app.get('/room/:roomId', (req, res) => {
     const roomId = sanitizeInput(req.params.roomId);
     console.log(`HTTP запрос состояния комнаты: roomId=${roomId}`);
-    try {
-        const playersResult = await pool.query(
-            'SELECT name, ready, hand, language, playerId FROM players WHERE roomId = $1',
-            [roomId]
-        );
-        const roomResult = await pool.query(
-            'SELECT roomId, trump, deck, gameTable, currentAttacker, currentDefender FROM rooms WHERE roomId = $1',
-            [roomId]
-        );
-
-        if (!roomResult.rows[0]) {
-            console.log(`Комната ${roomId} не найдена для HTTP запроса`);
-            return res.status(404).json({ error: 'Комната не найдена' });
+    db.all('SELECT name, ready, hand, language, playerId FROM players WHERE roomId = ?', [roomId], (err, players) => {
+        if (err) {
+            console.error('Ошибка получения игроков:', err.message);
+            return res.status(500).json({ error: 'Ошибка сервера' });
         }
-
-        const players = playersResult.rows;
-        const room = roomResult.rows[0];
-        const playerNames = players.map(p => p.name);
-        const readyCount = players.filter(p => p.ready).length;
-        const totalCount = players.length;
-        console.log(`HTTP ответ для комнаты ${roomId}: игроки=${playerNames.join(',') || 'нет'}, готовы=${readyCount}/${totalCount}`);
-
-        res.json({
-            players: players.map(player => ({
-                name: player.name,
-                ready: !!player.ready,
-                hand: player.hand ? JSON.parse(player.hand) : [],
-                language: player.language,
-                playerId: player.playerId
-            })),
-            readyCount,
-            totalCount,
-            trump: room.trump ? JSON.parse(room.trump) : null,
-            deckCount: room.deck ? JSON.parse(room.deck).length : 0,
-            table: room.gameTable ? JSON.parse(room.gameTable) : [],
-            currentAttacker: room.currentAttacker,
-            currentDefender: room.currentDefender
+        db.get('SELECT roomId, trump, deck, gameTable, currentAttacker, currentDefender FROM rooms WHERE roomId = ?', [roomId], (err, room) => {
+            if (err || !room) {
+                console.log(`Комната ${roomId} не найдена для HTTP запроса`);
+                return res.status(404).json({ error: 'Комната не найдена' });
+            }
+            const playerNames = players.map(p => p.name);
+            const readyCount = players.filter(p => p.ready).length;
+            const totalCount = players.length;
+            console.log(`HTTP ответ для комнаты ${roomId}: игроки=${playerNames.join(',') || 'нет'}, готовы=${readyCount}/${totalCount}`);
+            res.json({
+                players: players.map(player => ({
+                    name: player.name,
+                    ready: !!player.ready,
+                    hand: player.hand ? JSON.parse(player.hand) : [],
+                    language: player.language,
+                    playerId: player.playerId
+                })),
+                readyCount,
+                totalCount,
+                trump: room.trump ? JSON.parse(room.trump) : null,
+                deckCount: room.deck ? JSON.parse(room.deck).length : 0,
+                table: room.gameTable ? JSON.parse(room.gameTable) : [],
+                currentAttacker: room.currentAttacker,
+                currentDefender: room.currentDefender
+            });
         });
-    } catch (err) {
-        console.error('Ошибка получения состояния комнаты:', err.message);
-        res.status(500).json({ error: 'Ошибка сервера при получении состояния комнаты' });
-    }
+    });
 });
 
 // Функция очистки ввода
@@ -195,121 +187,134 @@ function sanitizeLanguage(lang) {
 // Генерация 4-значного кода комнаты
 async function generateRoomCode() {
     const code = Math.floor(1000 + Math.random() * 9000).toString();
-    const result = await pool.query('SELECT roomId FROM rooms WHERE roomId = $1', [code]);
-    if (result.rows.length > 0) {
-        return generateRoomCode(); // Рекурсия при совпадении кода
-    }
-    console.log(`Сгенерирован код комнаты: ${code}`);
-    return code;
+    return new Promise((resolve, reject) => {
+        db.get('SELECT roomId FROM rooms WHERE roomId = ?', [code], (err, row) => {
+            if (err) reject(err);
+            if (row) resolve(generateRoomCode());
+            else {
+                console.log(`Сгенерирован код комнаты: ${code}`);
+                resolve(code);
+            }
+        });
+    });
 }
 
 // Управление socketIds для игроков
 async function addSocketId(playerId, socketId) {
-    try {
-        const result = await pool.query('SELECT socketIds FROM players WHERE playerId = $1', [playerId]);
-        let socketIds = result.rows[0]?.socketIds ? JSON.parse(result.rows[0].socketIds) : [];
-        
-        // Отключение старых сокетов
-        socketIds.forEach(id => {
-            if (id !== socketId && io.sockets.sockets.get(id)) {
-                console.log(`Отключение старого сокета ${id} для playerId ${playerId}`);
-                io.to(id).emit('errorMessage', 'Другая сессия взяла управление этим игроком');
-                io.sockets.sockets.get(id)?.disconnect(true);
+    return new Promise((resolve, reject) => {
+        db.get('SELECT socketIds FROM players WHERE playerId = ?', [playerId], (err, row) => {
+            if (err) return reject(err);
+            let socketIds = row?.socketIds ? JSON.parse(row.socketIds) : [];
+            
+            socketIds.forEach(id => {
+                if (id !== socketId && io.sockets.sockets.get(id)) {
+                    console.log(`Отключение старого сокета ${id} для playerId ${playerId}`);
+                    io.to(id).emit('errorMessage', 'Другая сессия взяла управление этим игроком');
+                    io.sockets.sockets.get(id)?.disconnect(true);
+                }
+            });
+
+            socketIds = socketIds.filter(id => id === socketId || io.sockets.sockets.get(id));
+            if (!socketIds.includes(socketId)) {
+                socketIds.push(socketId);
             }
+
+            db.run('UPDATE players SET socketIds = ? WHERE playerId = ?', [JSON.stringify(socketIds), playerId], (err) => {
+                if (err) reject(err);
+                else {
+                    console.log(`Добавлен socketId ${socketId} для playerId ${playerId}`);
+                    resolve();
+                }
+            });
         });
-
-        // Обновление списка сокетов
-        socketIds = socketIds.filter(id => id === socketId || io.sockets.sockets.get(id));
-        if (!socketIds.includes(socketId)) {
-            socketIds.push(socketId);
-        }
-
-        await pool.query('UPDATE players SET socketIds = $1 WHERE playerId = $2', [JSON.stringify(socketIds), playerId]);
-        console.log(`Добавлен socketId ${socketId} для playerId ${playerId}`);
-    } catch (err) {
-        console.error('Ошибка добавления socketId:', err.message);
-        throw err;
-    }
+    });
 }
 
 async function removeSocketId(playerId, socketId) {
-    try {
-        const result = await pool.query('SELECT socketIds FROM players WHERE playerId = $1', [playerId]);
-        let socketIds = result.rows[0]?.socketIds ? JSON.parse(result.rows[0].socketIds) : [];
-        socketIds = socketIds.filter(id => id !== socketId);
-        await pool.query('UPDATE players SET socketIds = $1 WHERE playerId = $2', [JSON.stringify(socketIds), playerId]);
-        console.log(`Удален socketId ${socketId} для playerId ${playerId}`);
-    } catch (err) {
-        console.error('Ошибка удаления socketId:', err.message);
-        throw err;
-    }
+    return new Promise((resolve, reject) => {
+        db.get('SELECT socketIds FROM players WHERE playerId = ?', [playerId], (err, row) => {
+            if (err) return reject(err);
+            let socketIds = row?.socketIds ? JSON.parse(row.socketIds) : [];
+            socketIds = socketIds.filter(id => id !== socketId);
+            db.run('UPDATE players SET socketIds = ? WHERE playerId = ?', [JSON.stringify(socketIds), playerId], (err) => {
+                if (err) reject(err);
+                else {
+                    console.log(`Удален socketId ${socketId} для playerId ${playerId}`);
+                    resolve();
+                }
+            });
+        });
+    });
 }
 
 // Очистка дубликатов игроков
 async function cleanDuplicatePlayers(roomId, playerName, socketId, playerId) {
-    try {
-        const result = await pool.query(
-            'SELECT playerId, id, socketIds FROM players WHERE roomId = $1 AND name = $2 AND playerId != $3',
-            [roomId, playerName, playerId]
-        );
-        console.log(`Очистка дубликатов для ${playerName} в комнате ${roomId}, socket=${socketId}, playerId=${playerId}, найдено дубликатов: ${result.rows.length}`);
-        for (const row of result.rows) {
-            await pool.query('DELETE FROM players WHERE roomId = $1 AND playerId = $2', [roomId, row.playerId]);
-            console.log(`Удален дубликат игрока ${playerName} с playerId ${row.playerId} из комнаты ${roomId}`);
-        }
-    } catch (err) {
-        console.error('Ошибка очистки дубликатов игроков:', err.message);
-        throw err;
-    }
+    return new Promise((resolve, reject) => {
+        db.all('SELECT playerId, id, socketIds FROM players WHERE roomId = ? AND name = ? AND playerId != ?', [roomId, playerName, playerId], (err, rows) => {
+            if (err) return reject(err);
+            console.log(`Очистка дубликатов для ${playerName} в комнате ${roomId}, socket=${socketId}, playerId=${playerId}, найдено дубликатов: ${rows.length}`);
+            if (rows.length === 0) return resolve();
+            const deletions = rows.map(row => {
+                return new Promise((delResolve, delReject) => {
+                    db.run('DELETE FROM players WHERE roomId = ? AND playerId = ?', [roomId, row.playerId], (err) => {
+                        if (err) delReject(err);
+                        else {
+                            console.log(`Удален дубликат игрока ${playerName} с playerId ${row.playerId} из комнаты ${roomId}`);
+                            delResolve();
+                        }
+                    });
+                });
+            });
+            Promise.all(deletions).then(resolve).catch(reject);
+        });
+    });
 }
 
 // Ограничение присоединения игрока
 async function restrictPlayerJoin(roomId, playerName, playerId, socketId) {
-    try {
-        const result = await pool.query(
-            'SELECT playerId, isDisconnected, socketIds FROM players WHERE roomId = $1 AND name = $2 AND playerId != $3',
-            [roomId, playerName, playerId]
-        );
-        const row = result.rows[0];
-        if (row && !row.isDisconnected) {
-            const socketIds = row.socketIds ? JSON.parse(row.socketIds) : [];
-            if (socketIds.some(id => io.sockets.sockets.get(id))) {
-                console.log(`Игрок ${playerName} уже активен в комнате ${roomId} с другим playerId ${row.playerId}, блокировка присоединения`);
-                return false;
+    return new Promise((resolve, reject) => {
+        db.get('SELECT playerId, isDisconnected, socketIds FROM players WHERE roomId = ? AND name = ? AND playerId != ?', [roomId, playerName, playerId], (err, row) => {
+            if (err) return reject(err);
+            if (row && !row.isDisconnected) {
+                const socketIds = row.socketIds ? JSON.parse(row.socketIds) : [];
+                if (socketIds.some(id => io.sockets.sockets.get(id))) {
+                    console.log(`Игрок ${playerName} уже активен в комнате ${roomId} с другим playerId ${row.playerId}, блокировка присоединения`);
+                    resolve(false);
+                } else {
+                    resolve(true);
+                }
+            } else {
+                resolve(true);
             }
-        }
-        return true;
-    } catch (err) {
-        console.error('Ошибка проверки присоединения игрока:', err.message);
-        return false;
-    }
+        });
+    });
 }
 
 // Обработка игры с одним игроком
 async function handleSinglePlayerGame(roomId) {
-    try {
-        const roomResult = await pool.query('SELECT trump, gameEnded FROM rooms WHERE roomId = $1', [roomId]);
-        const room = roomResult.rows[0];
-        if (!room || !room.trump || room.gameEnded) {
-            console.log(`Комната ${roomId} неактивна или игра завершена`);
-            return;
-        }
-
-        const playersResult = await pool.query(
-            'SELECT DISTINCT playerId, name FROM players WHERE roomId = $1 AND isDisconnected = FALSE',
-            [roomId]
-        );
-        const players = playersResult.rows;
-        if (players.length === 1) {
-            const winner = players[0];
-            console.log(`Объявление ${winner.name} победителем в комнате ${roomId} из-за единственного активного игрока`);
-            await pool.query('UPDATE rooms SET gameEnded = TRUE WHERE roomId = $1', [roomId]);
-            io.to(roomId).emit('gameOver', { winners: [winner.name] });
-            await deleteRoom(roomId);
-        }
-    } catch (err) {
-        console.error('Ошибка обработки игры с одним игроком:', err.message);
-    }
+    return new Promise((resolve, reject) => {
+        db.get('SELECT trump, gameEnded FROM rooms WHERE roomId = ?', [roomId], (err, room) => {
+            if (err) return reject(err);
+            if (!room || !room.trump || room.gameEnded) {
+                console.log(`Комната ${roomId} неактивна или игра завершена`);
+                return resolve();
+            }
+            db.all('SELECT DISTINCT playerId, name FROM players WHERE roomId = ? AND isDisconnected = FALSE', [roomId], (err, players) => {
+                if (err) return reject(err);
+                if (players.length === 1) {
+                    const winner = players[0];
+                    console.log(`Объявление ${winner.name} победителем в комнате ${roomId} из-за единственного активного игрока`);
+                    db.run('UPDATE rooms SET gameEnded = TRUE WHERE roomId = ?', [roomId], (err) => {
+                        if (err) return reject(err);
+                        io.to(roomId).emit('gameOver', { winners: [winner.name] });
+                        deleteRoom(roomId).then(resolve).catch(reject);
+                    });
+                } else {
+                    resolve();
+                }
+            });
+        });
+    });
 }
 
 // Создание колоды карт
@@ -335,7 +340,7 @@ function shuffleDeck(deck) {
     console.log('Колода перемешана');
 }
 
-// Поиск наименьшей козырной карты для определения первого атакующего
+// Поиск наименьшей козырной карты
 function findLowestTrumpCard(players, trumpSuit) {
     const rankOrder = ['6', '7', '8', '9', '10', 'Jack', 'Queen', 'King', 'Ace'];
     let lowestTrumpCard = null;
@@ -366,53 +371,54 @@ function startTurnTimer(roomId) {
     clearTurnTimer(roomId);
     const timer = setTimeout(async () => {
         try {
-            const roomResult = await pool.query('SELECT currentDefender, gameEnded FROM rooms WHERE roomId = $1', [roomId]);
-            const room = roomResult.rows[0];
-            if (!room) {
-                console.error(`Комната ${roomId} не найдена для таймера`);
-                return;
-            }
-            if (room.gameEnded) {
-                console.log(`Комната ${roomId} завершена, пропуск действия таймера`);
-                return;
-            }
-            const playersResult = await pool.query(
-                'SELECT DISTINCT playerId FROM players WHERE roomId = $1 AND isDisconnected = FALSE',
-                [roomId]
-            );
-            const players = playersResult.rows;
-            if (players.length < 2) {
-                console.log(`Менее 2 игроков в комнате ${roomId}, обработка одиночной игры`);
-                await handleSinglePlayerGame(roomId);
-                return;
-            }
-            const playerIds = players.map(p => p.playerId);
-            const currentIndex = playerIds.indexOf(room.currentDefender);
-            const nextAttackerIndex = (currentIndex + 1) % playerIds.length;
-            const nextDefenderIndex = (nextAttackerIndex + 1) % playerIds.length;
-            const newAttacker = playerIds[nextAttackerIndex];
-            const newDefender = playerIds[nextDefenderIndex] || playerIds[0];
+            db.get('SELECT currentDefender, gameEnded FROM rooms WHERE roomId = ?', [roomId], async (err, room) => {
+                if (err || !room) {
+                    console.error(`Комната ${roomId} не найдена для таймера`);
+                    return;
+                }
+                if (room.gameEnded) {
+                    console.log(`Комната ${roomId} завершена, пропуск действия таймера`);
+                    return;
+                }
+                db.all('SELECT DISTINCT playerId FROM players WHERE roomId = ? AND isDisconnected = FALSE', [roomId], async (err, players) => {
+                    if (err) {
+                        console.error('Ошибка получения игроков:', err.message);
+                        return;
+                    }
+                    if (players.length < 2) {
+                        await handleSinglePlayerGame(roomId);
+                        return;
+                    }
+                    const playerIds = players.map(p => p.playerId);
+                    const currentIndex = playerIds.indexOf(room.currentDefender);
+                    const nextAttackerIndex = (currentIndex + 1) % playerIds.length;
+                    const nextDefenderIndex = (nextAttackerIndex + 1) % playerIds.length;
+                    const newAttacker = playerIds[nextAttackerIndex];
+                    const newDefender = playerIds[nextDefenderIndex] || playerIds[0];
 
-            await pool.query(
-                'UPDATE rooms SET gameTable = $1, currentAttacker = $2, currentDefender = $3, lastActivity = $4 WHERE roomId = $5',
-                [JSON.stringify([]), newAttacker, newDefender, Date.now(), roomId]
-            );
-            console.log(`Время хода истекло в комнате ${roomId}, новый атакующий: ${newAttacker}, новый защитник: ${newDefender}`);
-            io.to(roomId).emit('errorMessage', 'Время хода истекло');
-            await updateGameState(roomId);
-            startTurnTimer(roomId);
+                    db.run('UPDATE rooms SET gameTable = ?, currentAttacker = ?, currentDefender = ?, lastActivity = ? WHERE roomId = ?', 
+                        [JSON.stringify([]), newAttacker, newDefender, Date.now(), roomId], (err) => {
+                            if (err) {
+                                console.error('Ошибка обновления хода:', err.message);
+                                return;
+                            }
+                            console.log(`Время хода истекло в комнате ${roomId}, новый атакующий: ${newAttacker}, новый защитник: ${newDefender}`);
+                            io.to(roomId).emit('errorMessage', 'Время хода истекло');
+                            updateGameState(roomId);
+                            startTurnTimer(roomId);
+                        });
+                });
+            });
         } catch (err) {
             console.error('Ошибка обновления хода по таймеру:', err.message);
         }
-    }, 30000); // 30 секунд на ход
+    }, 30000);
 
     io.to(roomId).emit('startTimer', { duration: 30000 });
     const room = io.sockets.adapter.rooms.get(roomId);
     if (room) {
         room.timer = timer;
         console.log(`Таймер установлен для комнаты ${roomId}`);
-    } else {
-        console.warn(`Комната ${roomId} не найдена в adapter.rooms, таймер не установлен`);
     }
 }
 
@@ -426,207 +432,192 @@ function clearTurnTimer(roomId) {
     }
 }
 
-// Обновление состояния комнаты (для room.html)
+// Обновление состояния комнаты
 async function updateRoomState(roomId) {
-    try {
-        const playersResult = await pool.query(
-            'SELECT name, ready, isDisconnected, language, playerId, id, socketIds FROM players WHERE roomId = $1',
-            [roomId]
-        );
-        const players = playersResult.rows;
-        const readyCount = players.filter(p => p.ready).length;
-        const totalCount = players.length;
-        const activeCount = players.filter(p => !p.isDisconnected).length;
+    return new Promise((resolve, reject) => {
+        db.all('SELECT name, ready, isDisconnected, language, playerId, id, socketIds FROM players WHERE roomId = ?', [roomId], (err, players) => {
+            if (err) return reject(err);
+            const readyCount = players.filter(p => p.ready).length;
+            const totalCount = players.length;
+            const activeCount = players.filter(p => !p.isDisconnected).length;
 
-        await pool.query('UPDATE rooms SET activePlayers = $1 WHERE roomId = $2', [activeCount, roomId]);
-        console.log(`Обновление комнаты ${roomId}: игроки=${players.map(p => p.name).join(',') || 'нет'}, готовы=${readyCount}/${totalCount}, активны=${activeCount}`);
+            db.run('UPDATE rooms SET activePlayers = ? WHERE roomId = ?', [activeCount, roomId], (err) => {
+                if (err) return reject(err);
+                console.log(`Обновление комнаты ${roomId}: игроки=${players.map(p => p.name).join(',') || 'нет'}, готовы=${readyCount}/${totalCount}, активны=${activeCount}`);
+                io.to(roomId).emit('updateRoom', {
+                    players: players.map(player => ({
+                        name: player.name,
+                        ready: !!player.ready,
+                        playerId: player.playerId
+                    })),
+                    readyCount,
+                    totalCount,
+                    playerLanguages: players.map(player => ({ name: player.name, language: player.language }))
+                });
 
-        io.to(roomId).emit('updateRoom', {
-            players: players.map(player => ({
-                name: player.name,
-                ready: !!player.ready,
-                playerId: player.playerId
-            })),
-            readyCount,
-            totalCount,
-            playerLanguages: players.map(player => ({ name: player.name, language: player.language }))
+                players.forEach(player => {
+                    const socketIds = player.socketIds ? JSON.parse(player.socketIds) : [];
+                    socketIds.forEach(socketId => {
+                        io.to(socketId).emit('playerStatus', {
+                            playerId: player.playerId,
+                            ready: !!player.ready,
+                            isDisconnected: !!player.isDisconnected
+                        });
+                    });
+                });
+                resolve();
+            });
         });
+    });
+}
 
-        players.forEach(player => {
-            const socketIds = player.socketIds ? JSON.parse(player.socketIds) : [];
-            socketIds.forEach(socketId => {
-                io.to(socketId).emit('playerStatus', {
-                    playerId: player.playerId,
-                    ready: !!player.ready,
-                    isDisconnected: !!player.isDisconnected
+// Обновление состояния игры
+async function updateGameState(roomId) {
+    return new Promise((resolve, reject) => {
+        db.get('SELECT trump, deck, gameTable, currentAttacker, currentDefender, gameEnded FROM rooms WHERE roomId = ?', [roomId], (err, room) => {
+            if (err || !room) {
+                console.log(`Комната ${roomId} не найдена для состояния игры`);
+                io.to(roomId).emit('errorMessage', 'Комната игры не существует');
+                return reject(err || new Error('Комната не найдена'));
+            }
+            if (room.gameEnded) {
+                console.log(`Комната ${roomId} завершена, пропуск обновления состояния игры`);
+                return resolve();
+            }
+
+            db.all('SELECT id, name, hand, playerId, isDisconnected, language, socketIds FROM players WHERE roomId = ?', [roomId], (err, players) => {
+                if (err) return reject(err);
+                const activePlayers = players.filter(p => !p.isDisconnected);
+
+                db.run('UPDATE rooms SET activePlayers = ? WHERE roomId = ?', [activePlayers.length, roomId], async (err) => {
+                    if (err) return reject(err);
+
+                    if (activePlayers.length < 2 && room.trump) {
+                        await handleSinglePlayerGame(roomId);
+                        return resolve();
+                    }
+
+                    const table = room.gameTable ? JSON.parse(room.gameTable) : [];
+                    const canTakeCards = table.some(pair => pair.attack && !pair.defense);
+
+                    const gameState = {
+                        players: players.map(player => ({
+                            id: player.playerId,
+                            name: player.name,
+                            hand: player.hand ? JSON.parse(player.hand) : [],
+                            isDisconnected: !!player.isDisconnected,
+                            language: player.language
+                        })),
+                        trump: room.trump ? JSON.parse(room.trump) : null,
+                        deckCount: room.deck ? JSON.parse(room.deck).length : 0,
+                        table,
+                        currentAttacker: room.currentAttacker,
+                        currentDefender: room.currentDefender,
+                        canTakeCards
+                    };
+
+                    console.log(`Обновление игры ${roomId}: игроки=${players.map(p => p.name).join(',') || 'нет'}, козырь=${JSON.stringify(gameState.trump)}, колода=${gameState.deckCount}, стол=${JSON.stringify(gameState.table)}, атакующий=${room.currentAttacker}, защитник=${room.currentDefender}, canTakeCards=${canTakeCards}`);
+
+                    players.forEach(player => {
+                        const socketIds = player.socketIds ? JSON.parse(player.socketIds) : [];
+                        socketIds.forEach(socketId => {
+                            io.to(socketId).emit('updateGame', gameState);
+                        });
+                    });
+
+                    await checkGameEnd(roomId);
+                    db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId], (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
                 });
             });
         });
-    } catch (err) {
-        console.error('Ошибка обновления состояния комнаты:', err.message);
-        io.to(roomId).emit('errorMessage', 'Ошибка сервера при получении данных игроков');
-    }
-}
-
-// Обновление состояния игры (для game.html)
-async function updateGameState(roomId) {
-    try {
-        const roomResult = await pool.query(
-            'SELECT trump, deck, gameTable, currentAttacker, currentDefender, gameEnded FROM rooms WHERE roomId = $1',
-            [roomId]
-        );
-        const room = roomResult.rows[0];
-        if (!room) {
-            console.log(`Комната ${roomId} не найдена для состояния игры`);
-            io.to(roomId).emit('errorMessage', 'Комната игры не существует');
-            return;
-        }
-        if (room.gameEnded) {
-            console.log(`Комната ${roomId} завершена, пропуск обновления состояния игры`);
-            return;
-        }
-
-        const playersResult = await pool.query(
-            'SELECT id, name, hand, playerId, isDisconnected, language, socketIds FROM players WHERE roomId = $1',
-            [roomId]
-        );
-        const players = playersResult.rows;
-        const activePlayers = players.filter(p => !p.isDisconnected);
-
-        await pool.query('UPDATE rooms SET activePlayers = $1 WHERE roomId = $2', [activePlayers.length, roomId]);
-
-        if (activePlayers.length < 2 && room.trump) {
-            console.log(`Менее 2 активных игроков в комнате ${roomId}, обработка одиночной игры`);
-            await handleSinglePlayerGame(roomId);
-            return;
-        }
-
-        const table = room.gameTable ? JSON.parse(room.gameTable) : [];
-        const canTakeCards = table.some(pair => pair.attack && !pair.defense); // Флаг для кнопки "Take Cards"
-
-        const gameState = {
-            players: players.map(player => ({
-                id: player.playerId,
-                name: player.name,
-                hand: player.hand ? JSON.parse(player.hand) : [],
-                isDisconnected: !!player.isDisconnected,
-                language: player.language
-            })),
-            trump: room.trump ? JSON.parse(room.trump) : null,
-            deckCount: room.deck ? JSON.parse(room.deck).length : 0,
-            table,
-            currentAttacker: room.currentAttacker,
-            currentDefender: room.currentDefender,
-            canTakeCards // Отправка флага на клиент
-        };
-
-        console.log(`Обновление игры ${roomId}: игроки=${players.map(p => p.name).join(',') || 'нет'}, козырь=${JSON.stringify(gameState.trump)}, колода=${gameState.deckCount}, стол=${JSON.stringify(gameState.table)}, атакующий=${room.currentAttacker}, защитник=${room.currentDefender}, canTakeCards=${canTakeCards}`);
-
-        players.forEach(player => {
-            const socketIds = player.socketIds ? JSON.parse(player.socketIds) : [];
-            socketIds.forEach(socketId => {
-                io.to(socketId).emit('updateGame', gameState);
-            });
-        });
-
-        await checkGameEnd(roomId);
-        await pool.query('UPDATE rooms SET lastActivity = $1 WHERE roomId = $2', [Date.now(), roomId]);
-    } catch (err) {
-        console.error('Ошибка обновления состояния игры:', err.message);
-        io.to(roomId).emit('errorMessage', 'Ошибка сервера при получении состояния игры');
-    }
+    });
 }
 
 // Запуск игры
 async function startGame(roomId) {
     console.log(`Попытка запустить игру в комнате ${roomId}`);
-    try {
-        const roomResult = await pool.query('SELECT trump, gameEnded FROM rooms WHERE roomId = $1', [roomId]);
-        const room = roomResult.rows[0];
-        if (room?.trump) {
-            console.log(`Игра уже начата в комнате ${roomId}, обновление состояния`);
-            await updateGameState(roomId);
-            return;
-        }
-        if (room?.gameEnded) {
-            console.log(`Игра в комнате ${roomId} завершена, запуск невозможен`);
-            io.to(roomId).emit('errorMessage', 'Игра завершена');
-            return;
-        }
+    return new Promise((resolve, reject) => {
+        db.get('SELECT trump, gameEnded FROM rooms WHERE roomId = ?', [roomId], async (err, room) => {
+            if (err) return reject(err);
+            if (room?.trump) {
+                console.log(`Игра уже начата в комнате ${roomId}, обновление состояния`);
+                await updateGameState(roomId);
+                return resolve();
+            }
+            if (room?.gameEnded) {
+                console.log(`Игра в комнате ${roomId} завершена, запуск невозможен`);
+                io.to(roomId).emit('errorMessage', 'Игра завершена');
+                return resolve();
+            }
 
-        const playersResult = await pool.query(
-            'SELECT id, playerId, name, ready, isDisconnected, socketIds, hand FROM players WHERE roomId = $1',
-            [roomId]
-        );
-        const players = playersResult.rows;
-        const activePlayers = players.filter(p => !p.isDisconnected);
+            db.all('SELECT id, playerId, name, ready, isDisconnected, socketIds, hand FROM players WHERE roomId = ?', [roomId], async (err, players) => {
+                if (err) return reject(err);
+                const activePlayers = players.filter(p => !p.isDisconnected);
 
-        if (activePlayers.length < 2) {
-            console.log(`Недостаточно активных игроков для старта игры в комнате ${roomId}: ${activePlayers.length}`);
-            io.to(roomId).emit('errorMessage', 'Для начала игры требуется минимум 2 игрока');
-            return;
-        }
+                if (activePlayers.length < 2) {
+                    console.log(`Недостаточно активных игроков для старта игры в комнате ${roomId}: ${activePlayers.length}`);
+                    io.to(roomId).emit('errorMessage', 'Для начала игры требуется минимум 2 игрока');
+                    return resolve();
+                }
 
-        const readyCount = activePlayers.filter(p => p.ready).length;
-        if (readyCount !== activePlayers.length) {
-            console.log(`Не все активные игроки готовы в комнате ${roomId}: ${readyCount}/${activePlayers.length}`);
-            io.to(roomId).emit('errorMessage', 'Все активные игроки должны быть готовы для начала игры');
-            return;
-        }
+                const readyCount = activePlayers.filter(p => p.ready).length;
+                if (readyCount !== activePlayers.length) {
+                    console.log(`Не все активные игроки готовы в комнате ${roomId}: ${readyCount}/${activePlayers.length}`);
+                    io.to(roomId).emit('errorMessage', 'Все активные игроки должны быть готовы для начала игры');
+                    return resolve();
+                }
 
-        // Создание и перемешивание колоды
-        const deck = createDeck();
-        shuffleDeck(deck);
+                const deck = createDeck();
+                shuffleDeck(deck);
 
-        // Определение козыря
-        const trumpCard = deck[Math.floor(Math.random() * deck.length)];
-        const trump = { card: trumpCard, suit: trumpCard.suit };
-        deck.splice(deck.indexOf(trumpCard), 1);
-        deck.push(trumpCard);
+                const trumpCard = deck[Math.floor(Math.random() * deck.length)];
+                const trump = { card: trumpCard, suit: trumpCard.suit };
+                deck.splice(deck.indexOf(trumpCard), 1);
+                deck.push(trumpCard);
 
-        // Раздача карт игрокам
-        for (const player of activePlayers) {
-            const hand = deck.splice(0, 6);
-            await pool.query(
-                'UPDATE players SET hand = $1 WHERE playerId = $2',
-                [JSON.stringify(hand), player.playerId]
-            );
-            console.log(`Карты розданы игроку ${player.name} в комнате ${roomId}: ${hand.length} карт`);
-        }
+                for (const player of activePlayers) {
+                    const hand = deck.splice(0, 6);
+                    db.run('UPDATE players SET hand = ? WHERE playerId = ?', [JSON.stringify(hand), player.playerId], (err) => {
+                        if (err) reject(err);
+                        else console.log(`Карты розданы игроку ${player.name} в комнате ${roomId}: ${hand.length} карт`);
+                    });
+                }
 
-        // Определение первого атакующего
-        const { lowestTrumpCard, firstAttacker } = findLowestTrumpCard(activePlayers, trump.suit);
-        let currentAttacker, currentDefender;
+                const { lowestTrumpCard, firstAttacker } = findLowestTrumpCard(activePlayers, trump.suit);
+                let currentAttacker, currentDefender;
 
-        if (firstAttacker) {
-            console.log(`Первый атакующий в комнате ${roomId}: playerId=${firstAttacker}, наименьшая козырная карта=${lowestTrumpCard.rank} of ${lowestTrumpCard.suit}`);
-            currentAttacker = firstAttacker;
-            const activePlayerIds = activePlayers.map(p => p.playerId);
-            const attackerIndex = activePlayerIds.indexOf(firstAttacker);
-            const defenderIndex = (attackerIndex + 1) % activePlayerIds.length;
-            currentDefender = activePlayerIds[defenderIndex];
-        } else {
-            console.log(`Козырные карты не найдены в комнате ${roomId}, выбор случайного атакующего`);
-            const activePlayerIds = activePlayers.map(p => p.playerId);
-            currentAttacker = activePlayerIds[0];
-            currentDefender = activePlayerIds[1];
-        }
+                if (firstAttacker) {
+                    console.log(`Первый атакующий в комнате ${roomId}: playerId=${firstAttacker}, наименьшая козырная карта=${lowestTrumpCard.rank} of ${lowestTrumpCard.suit}`);
+                    currentAttacker = firstAttacker;
+                    const activePlayerIds = activePlayers.map(p => p.playerId);
+                    const attackerIndex = activePlayerIds.indexOf(firstAttacker);
+                    const defenderIndex = (attackerIndex + 1) % activePlayerIds.length;
+                    currentDefender = activePlayerIds[defenderIndex];
+                } else {
+                    console.log(`Козырные карты не найдены в комнате ${roomId}, выбор случайного атакующего`);
+                    const activePlayerIds = activePlayers.map(p => p.playerId);
+                    currentAttacker = activePlayerIds[0];
+                    currentDefender = activePlayerIds[1];
+                }
 
-        // Обновление состояния комнаты
-        await pool.query(
-            'UPDATE rooms SET trump = $1, deck = $2, gameTable = $3, currentAttacker = $4, currentDefender = $5, lastActivity = $6, activePlayers = $7, gameEnded = FALSE WHERE roomId = $8',
-            [JSON.stringify(trump), JSON.stringify(deck), JSON.stringify([]), currentAttacker, currentDefender, Date.now(), activePlayers.length, roomId]
-        );
-
-        console.log(`Игра начата в комнате ${roomId}, козырь: ${JSON.stringify(trump)}, атакующий: ${currentAttacker}, защитник: ${currentDefender}, колода: ${deck.length} карт`);
-
-        io.to(roomId).emit('startGame', { trump, currentAttacker, currentDefender });
-        await updateGameState(roomId);
-        startTurnTimer(roomId);
-    } catch (err) {
-        console.error('Ошибка запуска игры:', err.message);
-        io.to(roomId).emit('errorMessage', 'Ошибка сервера при запуске игры');
-    }
+                db.run(
+                    'UPDATE rooms SET trump = ?, deck = ?, gameTable = ?, currentAttacker = ?, currentDefender = ?, lastActivity = ?, activePlayers = ?, gameEnded = FALSE WHERE roomId = ?',
+                    [JSON.stringify(trump), JSON.stringify(deck), JSON.stringify([]), currentAttacker, currentDefender, Date.now(), activePlayers.length, roomId],
+                    (err) => {
+                        if (err) return reject(err);
+                        console.log(`Игра начата в комнате ${roomId}, козырь: ${JSON.stringify(trump)}, атакующий: ${currentAttacker}, защитник: ${currentDefender}, колода: ${deck.length} карт`);
+                        io.to(roomId).emit('startGame', { trump, currentAttacker, currentDefender });
+                        updateGameState(roomId);
+                        startTurnTimer(roomId);
+                        resolve();
+                    }
+                );
+            });
+        });
+    });
 }
 
 // Валидация карты для атаки
@@ -652,97 +643,111 @@ function isValidDefenseCard(defenseCard, attackCard, trump) {
 
 // Раздача карт игрокам
 async function drawCards(roomId, playerIds) {
-    try {
-        const roomResult = await pool.query('SELECT deck, gameEnded FROM rooms WHERE roomId = $1', [roomId]);
-        const room = roomResult.rows[0];
-        if (!room) {
-            console.log(`Комната ${roomId} не существует для раздачи карт`);
-            return;
-        }
-        if (room.gameEnded) {
-            console.log(`Комната ${roomId} завершена, пропуск раздачи карт`);
-            return;
-        }
-
-        let deck = room.deck ? JSON.parse(room.deck) : [];
-        for (const playerId of playerIds) {
-            const playerResult = await pool.query(
-                'SELECT hand, isDisconnected FROM players WHERE playerId = $1',
-                [playerId]
-            );
-            const player = playerResult.rows[0];
-            if (player.isDisconnected) {
-                console.log(`Игрок ${playerId} отключен, пропуск раздачи карт`);
-                continue;
+    return new Promise((resolve, reject) => {
+        db.get('SELECT deck, gameEnded FROM rooms WHERE roomId = ?', [roomId], (err, room) => {
+            if (err || !room) {
+                console.log(`Комната ${roomId} не существует для раздачи карт`);
+                return reject(err || new Error('Комната не найдена'));
             }
-            let hand = player.hand ? JSON.parse(player.hand) : [];
-            while (hand.length < 6 && deck.length > 0) {
-                hand.push(deck.shift());
+            if (room.gameEnded) {
+                console.log(`Комната ${roomId} завершена, пропуск раздачи карт`);
+                return resolve();
             }
-            await pool.query('UPDATE players SET hand = $1 WHERE playerId = $2', [JSON.stringify(hand), playerId]);
-            console.log(`Игроку ${playerId} роздано карт: ${hand.length}`);
-        }
 
-        await pool.query('UPDATE rooms SET deck = $1, lastActivity = $2 WHERE roomId = $3', [JSON.stringify(deck), Date.now(), roomId]);
-        console.log(`Колода обновлена в комнате ${roomId}: ${deck.length} карт`);
-    } catch (err) {
-        console.error('Ошибка раздачи карт:', err.message);
-    }
+            let deck = room.deck ? JSON.parse(room.deck) : [];
+            const updates = playerIds.map(playerId => {
+                return new Promise((res, rej) => {
+                    db.get('SELECT hand, isDisconnected FROM players WHERE playerId = ?', [playerId], (err, player) => {
+                        if (err) return rej(err);
+                        if (player.isDisconnected) {
+                            console.log(`Игрок ${playerId} отключен, пропуск раздачи карт`);
+                            return res();
+                        }
+                        let hand = player.hand ? JSON.parse(player.hand) : [];
+                        while (hand.length < 6 && deck.length > 0) {
+                            hand.push(deck.shift());
+                        }
+                        db.run('UPDATE players SET hand = ? WHERE playerId = ?', [JSON.stringify(hand), playerId], (err) => {
+                            if (err) rej(err);
+                            else {
+                                console.log(`Игроку ${playerId} роздано карт: ${hand.length}`);
+                                res();
+                            }
+                        });
+                    });
+                });
+            });
+
+            Promise.all(updates).then(() => {
+                db.run('UPDATE rooms SET deck = ?, lastActivity = ? WHERE roomId = ?', [JSON.stringify(deck), Date.now(), roomId], (err) => {
+                    if (err) reject(err);
+                    else {
+                        console.log(`Колода обновлена в комнате ${roomId}: ${deck.length} карт`);
+                        resolve();
+                    }
+                });
+            }).catch(reject);
+        });
+    });
 }
 
 // Проверка окончания игры
 async function checkGameEnd(roomId) {
-    try {
-        const roomResult = await pool.query('SELECT deck, gameEnded FROM rooms WHERE roomId = $1', [roomId]);
-        const room = roomResult.rows[0];
-        if (!room) {
-            console.log(`Комната ${roomId} не найдена для проверки окончания игры`);
-            return;
-        }
-        if (room.gameEnded) {
-            console.log(`Комната ${roomId} уже завершена, пропуск проверки окончания игры`);
-            return;
-        }
+    return new Promise((resolve, reject) => {
+        db.get('SELECT deck, gameEnded FROM rooms WHERE roomId = ?', [roomId], (err, room) => {
+            if (err || !room) {
+                console.log(`Комната ${roomId} не найдена для проверки окончания игры`);
+                return reject(err || new Error('Комната не найдена'));
+            }
+            if (room.gameEnded) {
+                console.log(`Комната ${roomId} уже завершена, пропуск проверки окончания игры`);
+                return resolve();
+            }
 
-        const deck = room.deck ? JSON.parse(room.deck) : [];
-        const playersResult = await pool.query(
-            'SELECT playerId, name, hand, isDisconnected FROM players WHERE roomId = $1',
-            [roomId]
-        );
-        const players = playersResult.rows;
-        const activePlayers = players.filter(p => !p.isDisconnected);
+            const deck = room.deck ? JSON.parse(room.deck) : [];
+            db.all('SELECT playerId, name, hand, isDisconnected FROM players WHERE roomId = ?', [roomId], (err, players) => {
+                if (err) return reject(err);
+                const activePlayers = players.filter(p => !p.isDisconnected);
 
-        if (activePlayers.length < 2) {
-            console.log(`Менее 2 активных игроков в комнате ${roomId}, обработка одиночной игры`);
-            await handleSinglePlayerGame(roomId);
-            return;
-        }
+                if (activePlayers.length < 2) {
+                    handleSinglePlayerGame(roomId).then(resolve).catch(reject);
+                    return;
+                }
 
-        const winners = activePlayers.filter(p => (JSON.parse(p.hand || '[]')).length === 0);
-        if (deck.length === 0 && winners.length > 0) {
-            const winnerNames = winners.map(p => p.name).join(', ');
-            console.log(`Игра завершена в комнате ${roomId}: Победители: ${winnerNames}`);
-            await pool.query('UPDATE rooms SET gameEnded = TRUE WHERE roomId = $1', [roomId]);
-            io.to(roomId).emit('gameOver', { winners: winners.map(p => p.name) });
-            await deleteRoom(roomId);
-        }
-    } catch (err) {
-        console.error('Ошибка проверки окончания игры:', err.message);
-    }
+                const winners = activePlayers.filter(p => (JSON.parse(p.hand || '[]')).length === 0);
+                if (deck.length === 0 && winners.length > 0) {
+                    const winnerNames = winners.map(p => p.name).join(', ');
+                    console.log(`Игра завершена в комнате ${roomId}: Победители: ${winnerNames}`);
+                    db.run('UPDATE rooms SET gameEnded = TRUE WHERE roomId = ?', [roomId], (err) => {
+                        if (err) return reject(err);
+                        io.to(roomId).emit('gameOver', { winners: winners.map(p => p.name) });
+                        deleteRoom(roomId).then(resolve).catch(reject);
+                    });
+                } else {
+                    resolve();
+                }
+            });
+        });
+    });
 }
 
 // Удаление комнаты
 async function deleteRoom(roomId) {
     clearTurnTimer(roomId);
-    try {
-        await pool.query('UPDATE rooms SET gameEnded = TRUE WHERE roomId = $1', [roomId]);
-        await pool.query('DELETE FROM players WHERE roomId = $1', [roomId]);
-        await pool.query('DELETE FROM rooms WHERE roomId = $1', [roomId]);
-        console.log(`Комната ${roomId} удалена после окончания игры`);
-        io.to(roomId).emit('roomDeleted', 'Игра завершена, комната удалена');
-    } catch (err) {
-        console.error('Ошибка удаления комнаты:', err.message);
-    }
+    return new Promise((resolve, reject) => {
+        db.run('UPDATE rooms SET gameEnded = TRUE WHERE roomId = ?', [roomId], (err) => {
+            if (err) return reject(err);
+            db.run('DELETE FROM players WHERE roomId = ?', [roomId], (err) => {
+                if (err) return reject(err);
+                db.run('DELETE FROM rooms WHERE roomId = ?', [roomId], (err) => {
+                    if (err) return reject(err);
+                    console.log(`Комната ${roomId} удалена после окончания игры`);
+                    io.to(roomId).emit('roomDeleted', 'Игра завершена, комната удалена');
+                    resolve();
+                });
+            });
+        });
+    });
 }
 
 // Обработчики Socket.io
@@ -777,26 +782,45 @@ io.on('connection', (socket) => {
         }
 
         try {
-            const playerResult = await pool.query('SELECT playerId FROM players WHERE playerId = $1', [playerId]);
-            if (playerResult.rows.length > 0) {
+            const existingPlayer = await new Promise((resolve, reject) => {
+                db.get('SELECT playerId FROM players WHERE playerId = ?', [playerId], (err, row) => {
+                    if (err) reject(err);
+                    resolve(row);
+                });
+            });
+            if (existingPlayer) {
                 playerId = uuidv4();
                 socket.emit('setPlayerId', playerId);
                 console.log(`Обнаружен дубликат playerId, назначен новый: ${playerId}`);
             }
 
             const roomId = await generateRoomCode();
-            await pool.query(
-                'INSERT INTO rooms (roomId, createdAt, lastActivity, gameEnded) VALUES ($1, $2, $3, $4)',
-                [roomId, Date.now(), Date.now(), false]
-            );
+            await new Promise((resolve, reject) => {
+                db.run('INSERT INTO rooms (roomId, createdAt, lastActivity, gameEnded) VALUES (?, ?, ?, ?)', 
+                    [roomId, Date.now(), Date.now(), false], (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+            });
 
-            await pool.query('DELETE FROM players WHERE id = $1', [socket.id]);
+            await new Promise((resolve, reject) => {
+                db.run('DELETE FROM players WHERE id = ?', [socket.id], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
             await cleanDuplicatePlayers(roomId, playerName, socket.id, playerId);
 
-            await pool.query(
-                'INSERT INTO players (id, roomId, playerId, name, ready, joinedAt, isDisconnected, language, socketIds) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-                [socket.id, roomId, playerId, playerName, false, Date.now(), false, language, JSON.stringify([socket.id])]
-            );
+            await new Promise((resolve, reject) => {
+                db.run(
+                    'INSERT INTO players (id, roomId, playerId, name, ready, joinedAt, isDisconnected, language, socketIds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [socket.id, roomId, playerId, playerName, false, Date.now(), false, language, JSON.stringify([socket.id])],
+                    (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    }
+                );
+            });
 
             console.log(`Комната ${roomId} создана, игрок ${playerName} добавлен с playerId ${playerId}, language=${language}, socket=${socket.id}`);
             socket.join(roomId);
@@ -835,18 +859,25 @@ io.on('connection', (socket) => {
         }
 
         try {
-            const roomResult = await pool.query('SELECT roomId FROM rooms WHERE roomId = $1', [roomId]);
-            if (!roomResult.rows[0]) {
+            const room = await new Promise((resolve, reject) => {
+                db.get('SELECT roomId FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
+                    if (err) reject(err);
+                    resolve(row);
+                });
+            });
+            if (!room) {
                 socket.emit('errorMessage', 'Комната не существует');
                 socket.emit('setPlayerId', playerId);
                 return;
             }
 
-            const playerResult = await pool.query(
-                'SELECT name, playerId, id, isDisconnected, hand, lastDisconnectedAt, language, ready, socketIds FROM players WHERE roomId = $1 AND playerId = $2',
-                [roomId, playerId]
-            );
-            const player = playerResult.rows[0];
+            const player = await new Promise((resolve, reject) => {
+                db.get('SELECT name, playerId, id, isDisconnected, hand, lastDisconnectedAt, language, ready, socketIds FROM players WHERE roomId = ? AND playerId = ?', 
+                    [roomId, playerId], (err, row) => {
+                        if (err) reject(err);
+                        resolve(row);
+                    });
+            });
 
             if (player) {
                 if (player.name !== playerName) {
@@ -860,24 +891,40 @@ io.on('connection', (socket) => {
                     socket.emit('roomJoined', { roomId, playerId, language: player.language, playerName });
                     socket.emit('playerStatus', { playerId, ready: !!player.ready, isDisconnected: false });
                     await updateRoomState(roomId);
-                    const gameResult = await pool.query('SELECT trump FROM rooms WHERE roomId = $1', [roomId]);
-                    if (gameResult.rows[0]?.trump) {
+                    const gameRoom = await new Promise((resolve, reject) => {
+                        db.get('SELECT trump FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
+                            if (err) reject(err);
+                            resolve(row);
+                        });
+                    });
+                    if (gameRoom?.trump) {
                         await updateGameState(roomId);
                     }
                     return;
                 } else {
-                    await pool.query(
-                        'UPDATE players SET id = $1, isDisconnected = FALSE, lastDisconnectedAt = NULL, language = $2, socketIds = $3 WHERE roomId = $4 AND playerId = $5',
-                        [socket.id, language, JSON.stringify([socket.id]), roomId, playerId]
-                    );
+                    await new Promise((resolve, reject) => {
+                        db.run(
+                            'UPDATE players SET id = ?, isDisconnected = FALSE, lastDisconnectedAt = NULL, language = ?, socketIds = ? WHERE roomId = ? AND playerId = ?',
+                            [socket.id, language, JSON.stringify([socket.id]), roomId, playerId],
+                            (err) => {
+                                if (err) reject(err);
+                                else resolve();
+                            }
+                        );
+                    });
                     console.log(`Игрок ${playerName} переподключился к комнате ${roomId}, playerId: ${playerId}, socket: ${socket.id}`);
                     socket.join(roomId);
                     socket.emit('roomJoined', { roomId, playerId, language: player.language, playerName });
                     socket.emit('playerStatus', { playerId, ready: !!player.ready, isDisconnected: false });
                     io.to(roomId).emit('playerReconnected', { playerName });
                     await updateRoomState(roomId);
-                    const gameResult = await pool.query('SELECT trump FROM rooms WHERE roomId = $1', [roomId]);
-                    if (gameResult.rows[0]?.trump) {
+                    const gameRoom = await new Promise((resolve, reject) => {
+                        db.get('SELECT trump FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
+                            if (err) reject(err);
+                            resolve(row);
+                        });
+                    });
+                    if (gameRoom?.trump) {
                         await updateGameState(roomId);
                     }
                     return;
@@ -891,26 +938,47 @@ io.on('connection', (socket) => {
             }
 
             await cleanDuplicatePlayers(roomId, playerName, socket.id, playerId);
-            await pool.query('DELETE FROM players WHERE id = $1', [socket.id]);
+            await new Promise((resolve, reject) => {
+                db.run('DELETE FROM players WHERE id = ?', [socket.id], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
 
-            const countResult = await pool.query('SELECT COUNT(*) as count FROM players WHERE roomId = $1', [roomId]);
-            if (parseInt(countResult.rows[0].count) >= 6) { // Лимит игроков
+            const playerCount = await new Promise((resolve, reject) => {
+                db.get('SELECT COUNT(*) as count FROM players WHERE roomId = ?', [roomId], (err, row) => {
+                    if (err) reject(err);
+                    resolve(row.count);
+                });
+            });
+            if (playerCount >= 6) {
                 socket.emit('errorMessage', 'Комната заполнена');
                 socket.emit('setPlayerId', playerId);
                 return;
             }
 
             socket.join(roomId);
-            await pool.query(
-                'INSERT INTO players (id, roomId, playerId, name, ready, joinedAt, isDisconnected, language, socketIds) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-                [socket.id, roomId, playerId, playerName, false, Date.now(), false, language, JSON.stringify([socket.id])]
-            );
+            await new Promise((resolve, reject) => {
+                db.run(
+                    'INSERT INTO players (id, roomId, playerId, name, ready, joinedAt, isDisconnected, language, socketIds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [socket.id, roomId, playerId, playerName, false, Date.now(), false, language, JSON.stringify([socket.id])],
+                    (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    }
+                );
+            });
 
             console.log(`Игрок ${playerName} присоединился к комнате ${roomId} с playerId ${playerId}, language=${language}, socket=${socket.id}`);
             socket.emit('roomJoined', { roomId, playerId, language, playerName });
             socket.emit('playerStatus', { playerId, ready: false, isDisconnected: false });
             await updateRoomState(roomId);
-            await pool.query('UPDATE rooms SET lastActivity = $1 WHERE roomId = $2', [Date.now(), roomId]);
+            await new Promise((resolve, reject) => {
+                db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
         } catch (err) {
             console.error('Ошибка присоединения к комнате:', err.message);
             socket.emit('errorMessage', 'Ошибка сервера');
@@ -924,11 +992,12 @@ io.on('connection', (socket) => {
         console.log(`Игрок ${playerName} запросил взять карты в комнате ${roomId}, playerId: ${playerId}`);
 
         try {
-            const roomResult = await pool.query(
-                'SELECT gameTable, currentDefender, deck, gameEnded FROM rooms WHERE roomId = $1',
-                [roomId]
-            );
-            const room = roomResult.rows[0];
+            const room = await new Promise((resolve, reject) => {
+                db.get('SELECT gameTable, currentDefender, deck, gameEnded FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
+                    if (err) reject(err);
+                    resolve(row);
+                });
+            });
             if (!room) {
                 console.log(`Комната ${roomId} не существует или была удалена`);
                 socket.emit('errorMessage', 'Комната игры не существует');
@@ -952,11 +1021,12 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            const playerResult = await pool.query(
-                'SELECT hand, isDisconnected FROM players WHERE playerId = $1',
-                [playerId]
-            );
-            const player = playerResult.rows[0];
+            const player = await new Promise((resolve, reject) => {
+                db.get('SELECT hand, isDisconnected FROM players WHERE playerId = ?', [playerId], (err, row) => {
+                    if (err) reject(err);
+                    resolve(row);
+                });
+            });
             if (!player) {
                 console.error(`Игрок ${playerId} не найден`);
                 socket.emit('errorMessage', 'Игрок не найден');
@@ -973,18 +1043,31 @@ io.on('connection', (socket) => {
                 if (pair.defense) defenderHand.push(pair.defense);
             });
 
-            await pool.query('UPDATE players SET hand = $1 WHERE playerId = $2', [JSON.stringify(defenderHand), playerId]);
+            await new Promise((resolve, reject) => {
+                db.run('UPDATE players SET hand = ? WHERE playerId = ?', [JSON.stringify(defenderHand), playerId], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
             console.log(`Игрок ${playerName} взял ${table.length} пар карт в комнате ${roomId}`);
 
             table = [];
-            await pool.query('UPDATE rooms SET gameTable = $1, lastActivity = $2 WHERE roomId = $3', [JSON.stringify(table), Date.now(), roomId]);
+            await new Promise((resolve, reject) => {
+                db.run('UPDATE rooms SET gameTable = ?, lastActivity = ? WHERE roomId = ?', [JSON.stringify(table), Date.now(), roomId], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
 
-            const playersResult = await pool.query('SELECT playerId, isDisconnected FROM players WHERE roomId = $1', [roomId]);
-            const players = playersResult.rows;
+            const players = await new Promise((resolve, reject) => {
+                db.all('SELECT playerId, isDisconnected FROM players WHERE roomId = ?', [roomId], (err, rows) => {
+                    if (err) reject(err);
+                    resolve(rows);
+                });
+            });
             const activePlayers = players.filter(p => !p.isDisconnected);
 
             if (activePlayers.length < 2) {
-                console.log(`Менее 2 активных игроков в комнате ${roomId}, обработка одиночной игры`);
                 await handleSinglePlayerGame(roomId);
                 return;
             }
@@ -997,10 +1080,13 @@ io.on('connection', (socket) => {
             const newDefender = playerIds[nextDefenderIndex] || playerIds[0];
 
             await drawCards(roomId, [newAttacker, newDefender]);
-            await pool.query(
-                'UPDATE rooms SET currentAttacker = $1, currentDefender = $2, lastActivity = $3 WHERE roomId = $4',
-                [newAttacker, newDefender, Date.now(), roomId]
-            );
+            await new Promise((resolve, reject) => {
+                db.run('UPDATE rooms SET currentAttacker = ?, currentDefender = ?, lastActivity = ? WHERE roomId = ?', 
+                    [newAttacker, newDefender, Date.now(), roomId], (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+            });
             console.log(`Ход обновлен в комнате ${roomId}: новый атакующий=${newAttacker}, новый защитник=${newDefender}`);
 
             await updateGameState(roomId);
@@ -1017,9 +1103,18 @@ io.on('connection', (socket) => {
         playerId = sanitizeInput(playerId);
         console.log(`Игрок ${playerId} меняет язык на ${language}`);
         try {
-            await pool.query('UPDATE players SET language = $1 WHERE playerId = $2', [language, playerId]);
-            const result = await pool.query('SELECT roomId, socketIds FROM players WHERE playerId = $1', [playerId]);
-            const player = result.rows[0];
+            await new Promise((resolve, reject) => {
+                db.run('UPDATE players SET language = ? WHERE playerId = ?', [language, playerId], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
+            const player = await new Promise((resolve, reject) => {
+                db.get('SELECT roomId, socketIds FROM players WHERE playerId = ?', [playerId], (err, row) => {
+                    if (err) reject(err);
+                    resolve(row);
+                });
+            });
             if (!player) {
                 socket.emit('errorMessage', 'Игрок не найден');
                 return;
@@ -1042,11 +1137,12 @@ io.on('connection', (socket) => {
         playerId = sanitizeInput(playerId);
         console.log(`Игрок готов в комнате ${roomId}, socket: ${socket.id}, playerId: ${playerId}`);
         try {
-            const playerResult = await pool.query(
-                'SELECT ready, isDisconnected, socketIds FROM players WHERE roomId = $1 AND playerId = $2',
-                [roomId, playerId]
-            );
-            const player = playerResult.rows[0];
+            const player = await new Promise((resolve, reject) => {
+                db.get('SELECT ready, isDisconnected, socketIds FROM players WHERE roomId = ? AND playerId = ?', [roomId, playerId], (err, row) => {
+                    if (err) reject(err);
+                    resolve(row);
+                });
+            });
             if (!player) {
                 console.warn(`Игрок ${playerId} не найден в комнате ${roomId}`);
                 socket.emit('errorMessage', 'Игрок не найден');
@@ -1061,26 +1157,35 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            await pool.query(
-                'UPDATE players SET isDisconnected = FALSE, lastDisconnectedAt = NULL, ready = TRUE WHERE roomId = $1 AND playerId = $2',
-                [roomId, playerId]
-            );
+            await new Promise((resolve, reject) => {
+                db.run('UPDATE players SET isDisconnected = FALSE, lastDisconnectedAt = NULL, ready = TRUE WHERE roomId = ? AND playerId = ?', 
+                    [roomId, playerId], (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+            });
             const socketIds = player.socketIds ? JSON.parse(player.socketIds) : [];
             socketIds.forEach(socketId => {
                 io.to(socketId).emit('playerStatus', { playerId, ready: true, isDisconnected: false });
             });
 
-            const countResult = await pool.query(
-                'SELECT COUNT(*) as total, SUM(ready::INTEGER) as ready FROM players WHERE roomId = $1 AND isDisconnected = FALSE',
-                [roomId]
-            );
-            const { total, ready } = countResult.rows[0];
-            console.log(`Статус комнаты ${roomId}: ${ready}/${total} готовы`);
+            const counts = await new Promise((resolve, reject) => {
+                db.get('SELECT COUNT(*) as total, SUM(ready) as ready FROM players WHERE roomId = ? AND isDisconnected = FALSE', [roomId], (err, row) => {
+                    if (err) reject(err);
+                    resolve(row);
+                });
+            });
+            console.log(`Статус комнаты ${roomId}: ${counts.ready}/${counts.total} готовы`);
 
             await updateRoomState(roomId);
-            await pool.query('UPDATE rooms SET lastActivity = $1 WHERE roomId = $2', [Date.now(), roomId]);
+            await new Promise((resolve, reject) => {
+                db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
 
-            if (parseInt(ready) >= 2 && parseInt(ready) === parseInt(total)) {
+            if (counts.ready >= 2 && counts.ready === counts.total) {
                 console.log(`Все игроки готовы в комнате ${roomId}, запуск игры`);
                 await startGame(roomId);
             }
@@ -1093,8 +1198,17 @@ io.on('connection', (socket) => {
     socket.on('requestPlayerUpdate', async (roomId) => {
         roomId = sanitizeInput(roomId);
         console.log(`Запрос обновления игроков для комнаты ${roomId}`);
-        await updateRoomState(roomId);
-        await pool.query('UPDATE rooms SET lastActivity = $1 WHERE roomId = $2', [Date.now(), roomId]);
+        try {
+            await updateRoomState(roomId);
+            await new Promise((resolve, reject) => {
+                db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
+        } catch (err) {
+            console.error('Ошибка обновления игроков:', err.message);
+        }
     });
 
     socket.on('leaveRoom', async ({ roomId, playerId, playerName }) => {
@@ -1104,14 +1218,28 @@ io.on('connection', (socket) => {
         console.log(`Игрок ${playerName} запросил выход из комнаты ${roomId}, playerId: ${playerId}`);
         try {
             await removeSocketId(playerId, socket.id);
-            const result = await pool.query('SELECT socketIds FROM players WHERE roomId = $1 AND playerId = $2', [roomId, playerId]);
-            const socketIds = result.rows[0]?.socketIds ? JSON.parse(result.rows[0].socketIds) : [];
+            const socketIds = await new Promise((resolve, reject) => {
+                db.get('SELECT socketIds FROM players WHERE roomId = ? AND playerId = ?', [roomId, playerId], (err, row) => {
+                    if (err) reject(err);
+                    resolve(row?.socketIds ? JSON.parse(row.socketIds) : []);
+                });
+            });
             if (socketIds.length === 0) {
-                await pool.query('DELETE FROM players WHERE roomId = $1 AND playerId = $2', [roomId, playerId]);
+                await new Promise((resolve, reject) => {
+                    db.run('DELETE FROM players WHERE roomId = ? AND playerId = ?', [roomId, playerId], (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+                });
                 console.log(`Игрок ${playerName} удален из комнаты ${roomId}`);
                 socket.leave(roomId);
                 await updateRoomState(roomId);
-                await pool.query('UPDATE rooms SET lastActivity = $1 WHERE roomId = $2', [Date.now(), roomId]);
+                await new Promise((resolve, reject) => {
+                    db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId], (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+                });
             } else {
                 socket.leave(roomId);
                 await updateRoomState(roomId);
@@ -1128,16 +1256,24 @@ io.on('connection', (socket) => {
         playerId = sanitizeInput(playerId);
         console.log(`Игрок ${playerName} запросил выход из игры ${roomId}, playerId: ${playerId}`);
         try {
-            await pool.query(
-                'UPDATE players SET isDisconnected = TRUE, lastDisconnectedAt = $1 WHERE roomId = $2 AND playerId = $3',
-                [Date.now(), roomId, playerId]
-            );
+            await new Promise((resolve, reject) => {
+                db.run('UPDATE players SET isDisconnected = TRUE, lastDisconnectedAt = ? WHERE roomId = ? AND playerId = ?', 
+                    [Date.now(), roomId, playerId], (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+            });
             console.log(`Игрок ${playerName} помечен как отключенный в игре ${roomId}`);
             await removeSocketId(playerId, socket.id);
             socket.leave(roomId);
             await updateGameState(roomId);
             await handleSinglePlayerGame(roomId);
-            await pool.query('UPDATE rooms SET lastActivity = $1 WHERE roomId = $2', [Date.now(), roomId]);
+            await new Promise((resolve, reject) => {
+                db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
         } catch (err) {
             console.error('Ошибка выхода из игры:', err.message);
             socket.emit('errorMessage', 'Ошибка сервера при выходе из игры');
@@ -1150,11 +1286,12 @@ io.on('connection', (socket) => {
         playerId = sanitizeInput(playerId);
         console.log(`Игрок ${playerName} (${role}) сыграл карту ${card.rank} of ${card.suit} в комнате ${roomId}, socket=${socket.id}`);
         try {
-            const roomResult = await pool.query(
-                'SELECT trump, gameTable, currentAttacker, currentDefender, gameEnded FROM rooms WHERE roomId = $1',
-                [roomId]
-            );
-            const room = roomResult.rows[0];
+            const room = await new Promise((resolve, reject) => {
+                db.get('SELECT trump, gameTable, currentAttacker, currentDefender, gameEnded FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
+                    if (err) reject(err);
+                    resolve(row);
+                });
+            });
             if (!room) {
                 socket.emit('errorMessage', 'Комната игры не существует');
                 return;
@@ -1168,11 +1305,12 @@ io.on('connection', (socket) => {
             const trump = room.trump ? JSON.parse(room.trump).suit : null;
             let table = room.gameTable ? JSON.parse(room.gameTable) : [];
 
-            const playerResult = await pool.query(
-                'SELECT id, isDisconnected, hand, socketIds FROM players WHERE roomId = $1 AND playerId = $2',
-                [roomId, playerId]
-            );
-            const player = playerResult.rows[0];
+            const player = await new Promise((resolve, reject) => {
+                db.get('SELECT id, isDisconnected, hand, socketIds FROM players WHERE roomId = ? AND playerId = ?', [roomId, playerId], (err, row) => {
+                    if (err) reject(err);
+                    resolve(row);
+                });
+            });
             if (!player) {
                 console.error(`Игрок ${playerId} не найден`);
                 socket.emit('errorMessage', 'Игрок не найден');
@@ -1222,8 +1360,18 @@ io.on('connection', (socket) => {
             }
 
             hand.splice(cardIndex, 1);
-            await pool.query('UPDATE players SET hand = $1 WHERE playerId = $2', [JSON.stringify(hand), playerId]);
-            await pool.query('UPDATE rooms SET gameTable = $1, lastActivity = $2 WHERE roomId = $3', [JSON.stringify(table), Date.now(), roomId]);
+            await new Promise((resolve, reject) => {
+                db.run('UPDATE players SET hand = ? WHERE playerId = ?', [JSON.stringify(hand), playerId], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
+            await new Promise((resolve, reject) => {
+                db.run('UPDATE rooms SET gameTable = ?, lastActivity = ? WHERE roomId = ?', [JSON.stringify(table), Date.now(), roomId], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
 
             console.log(`Карта сыграна в комнате ${roomId}: игрок=${playerName}, роль=${role}, карта=${card.rank} of ${card.suit}`);
             await updateGameState(roomId);
@@ -1241,11 +1389,12 @@ io.on('connection', (socket) => {
         playerId = sanitizeInput(playerId);
         console.log(`Игрок ${playerName} завершил ход в комнате ${roomId}`);
         try {
-            const roomResult = await pool.query(
-                'SELECT gameTable, currentAttacker, currentDefender, gameEnded FROM rooms WHERE roomId = $1',
-                [roomId]
-            );
-            const room = roomResult.rows[0];
+            const room = await new Promise((resolve, reject) => {
+                db.get('SELECT gameTable, currentAttacker, currentDefender, gameEnded FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
+                    if (err) reject(err);
+                    resolve(row);
+                });
+            });
             if (!room) {
                 socket.emit('errorMessage', 'Комната игры не существует');
                 return;
@@ -1257,11 +1406,12 @@ io.on('connection', (socket) => {
             }
 
             let table = room.gameTable ? JSON.parse(room.gameTable) : [];
-            const playerResult = await pool.query(
-                'SELECT id, isDisconnected, socketIds FROM players WHERE roomId = $1 AND playerId = $2',
-                [roomId, playerId]
-            );
-            const player = playerResult.rows[0];
+            const player = await new Promise((resolve, reject) => {
+                db.get('SELECT id, isDisconnected, socketIds FROM players WHERE roomId = ? AND playerId = ?', [roomId, playerId], (err, row) => {
+                    if (err) reject(err);
+                    resolve(row);
+                });
+            });
             if (!player) {
                 socket.emit('errorMessage', 'Игрок не найден');
                 return;
@@ -1279,11 +1429,12 @@ io.on('connection', (socket) => {
 
             const hasUndefended = table.some(pair => !pair.defense);
             if (hasUndefended) {
-                const playersResult = await pool.query(
-                    'SELECT playerId, name, hand, isDisconnected, socketIds FROM players WHERE roomId = $1',
-                    [roomId]
-                );
-                const players = playersResult.rows;
+                const players = await new Promise((resolve, reject) => {
+                    db.all('SELECT playerId, name, hand, isDisconnected, socketIds FROM players WHERE roomId = ?', [roomId], (err, rows) => {
+                        if (err) reject(err);
+                        resolve(rows);
+                    });
+                });
                 const defender = players.find(p => p.playerId === room.currentDefender);
                 if (!defender) {
                     socket.emit('errorMessage', 'Защитник не найден');
@@ -1296,15 +1447,24 @@ io.on('connection', (socket) => {
                     if (pair.defense) defenderHand.push(pair.defense);
                 });
 
-                await pool.query('UPDATE players SET hand = $1 WHERE playerId = $2', [JSON.stringify(defenderHand), defender.playerId]);
+                await new Promise((resolve, reject) => {
+                    db.run('UPDATE players SET hand = ? WHERE playerId = ?', [JSON.stringify(defenderHand), defender.playerId], (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+                });
                 console.log(`Защитник ${defender.name} взял карты в комнате ${roomId}`);
 
                 table = [];
-                await pool.query('UPDATE rooms SET gameTable = $1, lastActivity = $2 WHERE roomId = $3', [JSON.stringify(table), Date.now(), roomId]);
+                await new Promise((resolve, reject) => {
+                    db.run('UPDATE rooms SET gameTable = ?, lastActivity = ? WHERE roomId = ?', [JSON.stringify(table), Date.now(), roomId], (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+                });
 
                 const activePlayers = players.filter(p => !p.isDisconnected);
                 if (activePlayers.length < 2) {
-                    console.log(`Менее 2 активных игроков в комнате ${roomId}, обработка одиночной игры`);
                     await handleSinglePlayerGame(roomId);
                     return;
                 }
@@ -1317,10 +1477,13 @@ io.on('connection', (socket) => {
                 const newDefender = playerIds[nextDefenderIndex] || playerIds[0];
 
                 await drawCards(roomId, [newAttacker, newDefender]);
-                await pool.query(
-                    'UPDATE rooms SET currentAttacker = $1, currentDefender = $2, lastActivity = $3 WHERE roomId = $4',
-                    [newAttacker, newDefender, Date.now(), roomId]
-                );
+                await new Promise((resolve, reject) => {
+                    db.run('UPDATE rooms SET currentAttacker = ?, currentDefender = ?, lastActivity = ? WHERE roomId = ?', 
+                        [newAttacker, newDefender, Date.now(), roomId], (err) => {
+                            if (err) reject(err);
+                            else resolve();
+                        });
+                });
 
                 await updateGameState(roomId);
                 await checkGameEnd(roomId);
@@ -1328,17 +1491,22 @@ io.on('connection', (socket) => {
             } else {
                 console.log(`Защитник ${playerName} успешно отбился в комнате ${roomId}`);
                 table = [];
-                await pool.query('UPDATE rooms SET gameTable = $1, lastActivity = $2 WHERE roomId = $3', [JSON.stringify(table), Date.now(), roomId]);
+                await new Promise((resolve, reject) => {
+                    db.run('UPDATE rooms SET gameTable = ?, lastActivity = ? WHERE roomId = ?', [JSON.stringify(table), Date.now(), roomId], (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+                });
 
-                const playersResult = await pool.query(
-                    'SELECT playerId, name, isDisconnected FROM players WHERE roomId = $1',
-                    [roomId]
-                );
-                const players = playersResult.rows;
+                const players = await new Promise((resolve, reject) => {
+                    db.all('SELECT playerId, name, isDisconnected FROM players WHERE roomId = ?', [roomId], (err, rows) => {
+                        if (err) reject(err);
+                        resolve(rows);
+                    });
+                });
                 const activePlayers = players.filter(p => !p.isDisconnected);
 
                 if (activePlayers.length < 2) {
-                    console.log(`Менее 2 активных игроков в комнате ${roomId}, обработка одиночной игры`);
                     await handleSinglePlayerGame(roomId);
                     return;
                 }
@@ -1351,10 +1519,13 @@ io.on('connection', (socket) => {
                 const newDefender = playerIds[nextDefenderIndex] || playerIds[0];
 
                 await drawCards(roomId, [newAttacker, newDefender]);
-                await pool.query(
-                    'UPDATE rooms SET currentAttacker = $1, currentDefender = $2, lastActivity = $3 WHERE roomId = $4',
-                    [newAttacker, newDefender, Date.now(), roomId]
-                );
+                await new Promise((resolve, reject) => {
+                    db.run('UPDATE rooms SET currentAttacker = ?, currentDefender = ?, lastActivity = ? WHERE roomId = ?', 
+                        [newAttacker, newDefender, Date.now(), roomId], (err) => {
+                            if (err) reject(err);
+                            else resolve();
+                        });
+                });
 
                 await updateGameState(roomId);
                 await checkGameEnd(roomId);
@@ -1380,10 +1551,13 @@ io.on('connection', (socket) => {
         playerId = sanitizeInput(playerId);
         console.log(`Временное отключение: игрок=${playerName}, playerId=${playerId}, комната=${roomId}, socket=${socket.id}`);
         try {
-            await pool.query(
-                'UPDATE players SET isDisconnected = TRUE, lastDisconnectedAt = $1 WHERE roomId = $2 AND playerId = $3',
-                [Date.now(), roomId, playerId]
-            );
+            await new Promise((resolve, reject) => {
+                db.run('UPDATE players SET isDisconnected = TRUE, lastDisconnectedAt = ? WHERE roomId = ? AND playerId = ?', 
+                    [Date.now(), roomId, playerId], (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+            });
             console.log(`Игрок ${playerName} помечен как временно отключенный в комнате ${roomId}`);
             await removeSocketId(playerId, socket.id);
             await updateGameState(roomId);
@@ -1399,11 +1573,13 @@ io.on('connection', (socket) => {
         playerId = sanitizeInput(playerId);
         console.log(`Запрос переподключения: игрок=${playerName}, playerId=${playerId}, комната=${roomId}, socket=${socket.id}`);
         try {
-            const result = await pool.query(
-                'SELECT isDisconnected, language, ready, socketIds, name FROM players WHERE roomId = $1 AND playerId = $2',
-                [roomId, playerId]
-            );
-            const player = result.rows[0];
+            const player = await new Promise((resolve, reject) => {
+                db.get('SELECT isDisconnected, language, ready, socketIds, name FROM players WHERE roomId = ? AND playerId = ?', 
+                    [roomId, playerId], (err, row) => {
+                        if (err) reject(err);
+                        resolve(row);
+                    });
+            });
             if (!player) {
                 console.warn(`Игрок ${playerName} не найден в комнате ${roomId} для переподключения`);
                 socket.emit('errorMessage', 'Игрок не найден');
@@ -1414,10 +1590,13 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            await pool.query(
-                'UPDATE players SET isDisconnected = FALSE, lastDisconnectedAt = NULL WHERE roomId = $1 AND playerId = $2',
-                [roomId, playerId]
-            );
+            await new Promise((resolve, reject) => {
+                db.run('UPDATE players SET isDisconnected = FALSE, lastDisconnectedAt = NULL WHERE roomId = ? AND playerId = ?', 
+                    [roomId, playerId], (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+            });
             await addSocketId(playerId, socket.id);
 
             console.log(`Игрок ${playerName} переподключился к комнате ${roomId}, playerId: ${playerId}, socket: ${socket.id}`);
@@ -1427,8 +1606,13 @@ io.on('connection', (socket) => {
             io.to(roomId).emit('playerReconnected', { playerName });
             await updateRoomState(roomId);
 
-            const gameResult = await pool.query('SELECT trump FROM rooms WHERE roomId = $1', [roomId]);
-            if (gameResult.rows[0]?.trump) {
+            const gameRoom = await new Promise((resolve, reject) => {
+                db.get('SELECT trump FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
+                    if (err) reject(err);
+                    resolve(row);
+                });
+            });
+            if (gameRoom?.trump) {
                 await updateGameState(roomId);
                 await handleSinglePlayerGame(roomId);
             }
@@ -1441,11 +1625,12 @@ io.on('connection', (socket) => {
     socket.on('disconnect', async () => {
         console.log(`Пользователь отключился: socketId=${socket.id}`);
         try {
-            const result = await pool.query(
-                'SELECT roomId, playerId, name FROM players WHERE id = $1',
-                [socket.id]
-            );
-            const player = result.rows[0];
+            const player = await new Promise((resolve, reject) => {
+                db.get('SELECT roomId, playerId, name FROM players WHERE id = ?', [socket.id], (err, row) => {
+                    if (err) reject(err);
+                    resolve(row);
+                });
+            });
             if (!player) {
                 console.log(`Игрок с socketId ${socket.id} не найден в базе данных`);
                 return;
@@ -1455,27 +1640,41 @@ io.on('connection', (socket) => {
             console.log(`Игрок ${name} отключился от комнаты ${roomId}, playerId: ${playerId}, socket=${socket.id}`);
 
             await removeSocketId(playerId, socket.id);
-            const socketResult = await pool.query(
-                'SELECT socketIds FROM players WHERE roomId = $1 AND playerId = $2',
-                [roomId, playerId]
-            );
-            const socketIds = socketResult.rows[0]?.socketIds ? JSON.parse(socketResult.rows[0].socketIds) : [];
+            const socketIds = await new Promise((resolve, reject) => {
+                db.get('SELECT socketIds FROM players WHERE roomId = ? AND playerId = ?', [roomId, playerId], (err, row) => {
+                    if (err) reject(err);
+                    resolve(row?.socketIds ? JSON.parse(row.socketIds) : []);
+                });
+            });
 
             if (socketIds.length === 0) {
-                await pool.query(
-                    'UPDATE players SET isDisconnected = TRUE, lastDisconnectedAt = $1 WHERE roomId = $2 AND playerId = $3',
-                    [Date.now(), roomId, playerId]
-                );
+                await new Promise((resolve, reject) => {
+                    db.run('UPDATE players SET isDisconnected = TRUE, lastDisconnectedAt = ? WHERE roomId = ? AND playerId = ?', 
+                        [Date.now(), roomId, playerId], (err) => {
+                            if (err) reject(err);
+                            else resolve();
+                        });
+                });
                 console.log(`Игрок ${name} помечен как отключенный в комнате ${roomId}`);
 
-                const gameResult = await pool.query('SELECT trump FROM rooms WHERE roomId = $1', [roomId]);
-                if (gameResult.rows[0]?.trump) {
+                const gameRoom = await new Promise((resolve, reject) => {
+                    db.get('SELECT trump FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
+                        if (err) reject(err);
+                        resolve(row);
+                    });
+                });
+                if (gameRoom?.trump) {
                     await updateGameState(roomId);
                     await handleSinglePlayerGame(roomId);
                 } else {
                     await updateRoomState(roomId);
                 }
-                await pool.query('UPDATE rooms SET lastActivity = $1 WHERE roomId = $2', [Date.now(), roomId]);
+                await new Promise((resolve, reject) => {
+                    db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId], (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+                });
             } else {
                 await updateRoomState(roomId);
             }
@@ -1489,42 +1688,34 @@ io.on('connection', (socket) => {
 async function cleanOldRooms() {
     const oneHourAgo = Date.now() - 3600000; // 1 час назад
     try {
-        const roomsResult = await pool.query('SELECT roomId FROM rooms WHERE lastActivity < $1', [oneHourAgo]);
-        for (const room of roomsResult.rows) {
-            const playersResult = await pool.query('SELECT COUNT(*) as count FROM players WHERE roomId = $1', [room.roomId]);
-            const count = parseInt(playersResult.rows[0].count);
-            console.log(`Очистка комнаты ${room.roomId} с ${count} игроками`);
-            if (count === 0) {
-                clearTurnTimer(room.roomId);
-                await pool.query('DELETE FROM players WHERE roomId = $1', [room.roomId]);
-                await pool.query('DELETE FROM rooms WHERE roomId = $1', [room.roomId]);
-                console.log(`Комната ${room.roomId} удалена`);
-            }
+        const rooms = await new Promise((resolve, reject) => {
+            db.all('SELECT roomId FROM rooms WHERE lastActivity < ? AND gameEnded = FALSE', [oneHourAgo], (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows);
+            });
+        });
+
+        for (const room of rooms) {
+            console.log(`Очистка старой комнаты: ${room.roomId}`);
+            await deleteRoom(room.roomId);
         }
+        console.log(`Очистка старых комнат завершена, удалено: ${rooms.length} комнат`);
     } catch (err) {
         console.error('Ошибка очистки старых комнат:', err.message);
     }
 }
-setInterval(cleanOldRooms, 60000); // Каждую минуту
 
-// Обработка завершения работы сервера
-process.on('SIGTERM', async () => {
-    console.log('Получен SIGTERM, завершение работы');
-    try {
-        io.emit('serverShutdown', 'Сервер завершает работу');
-        await pool.end();
-        console.log('Соединение с базой данных закрыто');
-        server.close(() => {
-            console.log('Сервер остановлен');
-            process.exit(0);
-        });
-    } catch (err) {
-        console.error('Ошибка при завершении работы:', err.message);
-        process.exit(1);
-    }
+// Запуск периодической очистки каждые 10 минут
+setInterval(cleanOldRooms, 10 * 60 * 1000);
+
+// Обработка ошибок сервера
+server.on('error', (err) => {
+    console.error('Ошибка сервера:', err.message);
 });
 
 // Запуск сервера
 server.listen(PORT, () => {
     console.log(`Сервер запущен на порту ${PORT}`);
+    console.log(`APP_URL: ${APP_URL}`);
+    console.log(`База данных SQLite: ${dbPath}`);
 });
