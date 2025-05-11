@@ -1,3 +1,4 @@
+// Подключение необходимых модулей
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
@@ -5,62 +6,86 @@ const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const cron = require('node-cron');
+const axios = require('axios');
 
-// Initialize Express and HTTP server
+// Инициализация приложения Express и HTTP-сервера
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
     cors: {
         origin: '*',
-        methods: ['GET', 'POST']
+        methods: ['GET', 'POST'],
+        credentials: true
     }
 });
 
-// Environment variables
+// Настройка переменных окружения
 const PORT = process.env.PORT || 3000;
-const dbPath = path.join('/tmp', 'durak_game.db'); // Use /tmp for SQLite on Render
+const dbPath = path.join('/tmp', 'durak_game.db');
+const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
 
-// Check database file permissions
+// Проверка прав доступа к файлу базы данных
 function checkDatabasePermissions() {
     try {
         if (fs.existsSync(dbPath)) {
             fs.accessSync(dbPath, fs.constants.F_OK | fs.constants.W_OK);
             console.log('Database file is accessible and writable');
             fs.stat(dbPath, (err, stats) => {
-                if (err) console.error('Error getting database file stats:', err.message);
-                else console.log('Database file stats:', stats);
+                if (err) {
+                    console.error('Error getting database file stats:', err.message);
+                } else {
+                    console.log('Database file stats:', stats);
+                }
             });
         } else {
-            console.log('Database file does not exist, will be created automatically');
+            console.log('Database file does not exist, will be created');
         }
     } catch (err) {
-        console.error('Error checking database file:', err.message);
+        console.error('Error checking database file permissions:', err.message);
         process.exit(1);
     }
 }
 checkDatabasePermissions();
 
-// Initialize SQLite database
+// Инициализация базы данных SQLite
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
-        console.error('Error connecting to database:', err.message);
+        console.error('Failed to connect to SQLite database:', err.message);
         process.exit(1);
     }
-    console.log('Connected to SQLite database');
+    console.log('Successfully connected to SQLite database at', dbPath);
 });
 
-// Create database schema
+// Инициализация структуры базы данных
 function initDatabase() {
     db.serialize(() => {
+        // Удаление старых таблиц, если они существуют
         db.run('DROP TABLE IF EXISTS rooms', (err) => {
-            if (err) console.error('Error dropping rooms table:', err.message);
-            else console.log('Old rooms table dropped');
-        });
-        db.run('DROP TABLE IF EXISTS players', (err) => {
-            if (err) console.error('Error dropping players table:', err.message);
-            else console.log('Old players table dropped');
+            if (err) {
+                console.error('Error dropping rooms table:', err.message);
+            } else {
+                console.log('Old rooms table dropped successfully');
+            }
         });
 
+        db.run('DROP TABLE IF EXISTS players', (err) => {
+            if (err) {
+                console.error('Error dropping players table:', err.message);
+            } else {
+                console.log('Old players table dropped successfully');
+            }
+        });
+
+        db.run('DROP TABLE IF EXISTS game_history', (err) => {
+            if (err) {
+                console.error('Error dropping game_history table:', err.message);
+            } else {
+                console.log('Old game_history table dropped successfully');
+            }
+        });
+
+        // Создание таблицы rooms
         db.run(`
             CREATE TABLE rooms (
                 roomId TEXT PRIMARY KEY,
@@ -75,10 +100,14 @@ function initDatabase() {
                 gameEnded INTEGER DEFAULT 0
             )
         `, (err) => {
-            if (err) console.error('Error creating rooms table:', err.message);
-            else console.log('Rooms table created');
+            if (err) {
+                console.error('Error creating rooms table:', err.message);
+            } else {
+                console.log('Rooms table created successfully');
+            }
         });
 
+        // Создание таблицы players
         db.run(`
             CREATE TABLE players (
                 id TEXT PRIMARY KEY,
@@ -92,38 +121,104 @@ function initDatabase() {
                 lastDisconnectedAt INTEGER,
                 language TEXT DEFAULT 'en',
                 socketIds TEXT DEFAULT '[]',
+                wins INTEGER DEFAULT 0,
+                losses INTEGER DEFAULT 0,
                 FOREIGN KEY (roomId) REFERENCES rooms (roomId)
             )
         `, (err) => {
-            if (err) console.error('Error creating players table:', err.message);
-            else console.log('Players table created');
+            if (err) {
+                console.error('Error creating players table:', err.message);
+            } else {
+                console.log('Players table created successfully');
+            }
         });
 
-        db.run('DELETE FROM rooms', (err) => {
-            if (err) console.error('Error clearing rooms:', err.message);
-            else console.log('Rooms table cleared');
+        // Создание таблицы game_history для хранения истории ходов
+        db.run(`
+            CREATE TABLE game_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                roomId TEXT,
+                playerId TEXT,
+                action TEXT,
+                card TEXT,
+                timestamp INTEGER,
+                FOREIGN KEY (roomId) REFERENCES rooms (roomId),
+                FOREIGN KEY (playerId) REFERENCES players (playerId)
+            )
+        `, (err) => {
+            if (err) {
+                console.error('Error creating game_history table:', err.message);
+            } else {
+                console.log('Game_history table created successfully');
+            }
         });
+
+        // Очистка старых данных
+        db.run('DELETE FROM rooms', (err) => {
+            if (err) {
+                console.error('Error clearing rooms table:', err.message);
+            } else {
+                console.log('Rooms table cleared successfully');
+            }
+        });
+
         db.run('DELETE FROM players', (err) => {
-            if (err) console.error('Error clearing players:', err.message);
-            else console.log('Players table cleared');
+            if (err) {
+                console.error('Error clearing players table:', err.message);
+            } else {
+                console.log('Players table cleared successfully');
+            }
         });
     });
 }
 initDatabase();
 
-// Sanitize input data
+// Настройка пингера для поддержания активности сервера
+function setupPinger() {
+    cron.schedule('*/5 * * * *', async () => {
+        try {
+            const response = await axios.get(APP_URL);
+            console.log(`Pinged ${APP_URL} to keep server awake, status: ${response.status}`);
+        } catch (err) {
+            console.error('Error pinging server:', err.message);
+        }
+    });
+    console.log('Pinger scheduled to run every 5 minutes');
+}
+setupPinger();
+
+// Очистка устаревших комнат (старше 1 часа)
+function cleanupOldRooms() {
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    db.run('DELETE FROM rooms WHERE lastActivity < ? AND gameEnded = 1', [oneHourAgo], (err) => {
+        if (err) {
+            console.error('Error cleaning up old rooms:', err.message);
+        } else {
+            console.log('Old rooms cleaned up successfully');
+        }
+    });
+    db.run('DELETE FROM players WHERE roomId NOT IN (SELECT roomId FROM rooms)', (err) => {
+        if (err) {
+            console.error('Error cleaning up orphaned players:', err.message);
+        } else {
+            console.log('Orphaned players cleaned up successfully');
+        }
+    });
+}
+cron.schedule('0 * * * *', cleanupOldRooms); // Каждый час
+
+// Функции санитизации ввода
 function sanitizeInput(input) {
     if (typeof input !== 'string') return '';
     return input.replace(/[^\p{L}\p{N}_-]/gu, '').slice(0, 50);
 }
 
-// Sanitize language input
 function sanitizeLanguage(lang) {
     const validLanguages = ['en', 'ru', 'uk'];
     return validLanguages.includes(lang) ? lang : 'en';
 }
 
-// Generate 4-digit room code
+// Генерация уникального кода комнаты
 function generateRoomCode(callback) {
     const code = Math.floor(1000 + Math.random() * 9000).toString();
     db.get('SELECT roomId FROM rooms WHERE roomId = ?', [code], (err, row) => {
@@ -133,18 +228,20 @@ function generateRoomCode(callback) {
             return;
         }
         if (row) {
+            console.log(`Room code ${code} already exists, generating new one`);
             generateRoomCode(callback);
         } else {
+            console.log(`Generated unique room code: ${code}`);
             callback(code);
         }
     });
 }
 
-// Manage socket IDs for a player
+// Управление socketIds для игроков
 function addSocketId(playerId, socketId, callback) {
     db.get('SELECT socketIds FROM players WHERE playerId = ?', [playerId], (err, row) => {
         if (err) {
-            console.error('Error fetching socketIds:', err.message);
+            console.error('Error fetching socketIds for player:', err.message);
             callback(err);
             return;
         }
@@ -152,7 +249,7 @@ function addSocketId(playerId, socketId, callback) {
         socketIds.forEach(id => {
             if (id !== socketId && io.sockets.sockets.get(id)) {
                 console.log(`Disconnecting old socket ${id} for playerId ${playerId}`);
-                io.to(id).emit('errorMessage', 'Another session has taken over this player');
+                io.to(id).emit('errorMessage', 'Another session has taken over');
                 io.sockets.sockets.get(id)?.disconnect(true);
             }
         });
@@ -161,7 +258,11 @@ function addSocketId(playerId, socketId, callback) {
             socketIds.push(socketId);
         }
         db.run('UPDATE players SET socketIds = ? WHERE playerId = ?', [JSON.stringify(socketIds), playerId], (err) => {
-            if (err) console.error('Error updating socketIds:', err.message);
+            if (err) {
+                console.error('Error updating socketIds:', err.message);
+            } else {
+                console.log(`Socket ${socketId} added for player ${playerId}`);
+            }
             callback(err);
         });
     });
@@ -170,20 +271,24 @@ function addSocketId(playerId, socketId, callback) {
 function removeSocketId(playerId, socketId, callback) {
     db.get('SELECT socketIds FROM players WHERE playerId = ?', [playerId], (err, row) => {
         if (err) {
-            console.error('Error fetching socketIds:', err.message);
+            console.error('Error fetching socketIds for player:', err.message);
             callback(err);
             return;
         }
         let socketIds = row && row.socketIds ? JSON.parse(row.socketIds) : [];
         socketIds = socketIds.filter(id => id !== socketId);
         db.run('UPDATE players SET socketIds = ? WHERE playerId = ?', [JSON.stringify(socketIds), playerId], (err) => {
-            if (err) console.error('Error updating socketIds:', err.message);
+            if (err) {
+                console.error('Error removing socketId:', err.message);
+            } else {
+                console.log(`Socket ${socketId} removed for player ${playerId}`);
+            }
             callback(err);
         });
     });
 }
 
-// Clean duplicate players
+// Очистка дублирующихся игроков
 function cleanDuplicatePlayers(roomId, playerName, socketId, playerId, callback) {
     db.all('SELECT playerId, id, socketIds FROM players WHERE roomId = ? AND name = ? AND playerId != ?', [roomId, playerName, playerId], (err, rows) => {
         if (err) {
@@ -191,18 +296,18 @@ function cleanDuplicatePlayers(roomId, playerName, socketId, playerId, callback)
             callback(err);
             return;
         }
-        console.log(`Cleaning duplicates for ${playerName} in room ${roomId}, socket=${socketId}, playerId=${playerId}, found ${rows.length} duplicates`);
-        let deleted = 0;
         if (rows.length === 0) {
+            console.log(`No duplicate players found for ${playerName} in room ${roomId}`);
             callback(null);
             return;
         }
+        let deleted = 0;
         rows.forEach(row => {
             db.run('DELETE FROM players WHERE roomId = ? AND playerId = ?', [roomId, row.playerId], err => {
                 if (err) {
                     console.error('Error deleting duplicate player:', err.message);
                 } else {
-                    console.log(`Removed duplicate player ${playerName} with playerId ${row.playerId} from room ${roomId}`);
+                    console.log(`Deleted duplicate player ${row.playerId} in room ${roomId}`);
                 }
                 deleted++;
                 if (deleted === rows.length) {
@@ -213,45 +318,51 @@ function cleanDuplicatePlayers(roomId, playerName, socketId, playerId, callback)
     });
 }
 
-// Restrict player join
+// Ограничение подключения игроков
 function restrictPlayerJoin(roomId, playerName, playerId, socketId, callback) {
     db.get('SELECT playerId, isDisconnected, socketIds FROM players WHERE roomId = ? AND name = ? AND playerId != ?', [roomId, playerName, playerId], (err, row) => {
         if (err) {
-            console.error('Error checking player join:', err.message);
+            console.error('Error checking player join restriction:', err.message);
             callback(false);
             return;
         }
         if (row && !row.isDisconnected) {
             const socketIds = row.socketIds ? JSON.parse(row.socketIds) : [];
             if (socketIds.some(id => io.sockets.sockets.get(id))) {
-                console.log(`Player ${playerName} already active in room ${roomId} with different playerId ${row.playerId}, blocking join`);
+                console.log(`Player ${playerName} is already active in room ${roomId}`);
                 callback(false);
                 return;
             }
         }
+        console.log(`Player ${playerName} can join room ${roomId}`);
         callback(true);
     });
 }
 
-// Handle single player game
+// Обработка случая с одним игроком
 function handleSinglePlayerGame(roomId) {
-    db.get('SELECT trump FROM rooms WHERE roomId = ?', [roomId], (err, room) => {
+    db.get('SELECT trump, gameEnded FROM rooms WHERE roomId = ?', [roomId], (err, room) => {
         if (err) {
-            console.error('Error checking room:', err.message);
+            console.error('Error checking room for single player:', err.message);
             return;
         }
-        if (!room || !room.trump) return;
+        if (!room || !room.trump || room.gameEnded) return;
         db.all('SELECT DISTINCT playerId, name FROM players WHERE roomId = ? AND isDisconnected = 0', [roomId], (err, players) => {
             if (err) {
-                console.error('Error fetching active players:', err.message);
+                console.error('Error fetching players for single player check:', err.message);
                 return;
             }
-            if (players.length === 1) {
+            if (players.length <= 1) {
                 const winner = players[0];
-                console.log(`Declaring ${winner.name} as winner in room ${roomId} due to single unique player`);
+                console.log(`Declaring ${winner ? winner.name : 'no one'} as winner in room ${roomId}`);
                 db.run('UPDATE rooms SET gameEnded = 1 WHERE roomId = ?', [roomId], err => {
-                    if (err) console.error('Error marking game as ended:', err.message);
-                    io.to(roomId).emit('gameOver', { winners: [winner.name] });
+                    if (err) {
+                        console.error('Error marking game as ended:', err.message);
+                    }
+                    io.to(roomId).emit('gameOver', { winners: winner ? [winner.name] : [] });
+                    if (winner) {
+                        db.run('UPDATE players SET wins = wins + 1 WHERE playerId = ?', [winner.playerId]);
+                    }
                     deleteRoom(roomId);
                 });
             }
@@ -259,7 +370,7 @@ function handleSinglePlayerGame(roomId) {
     });
 }
 
-// Serve static files from public folder
+// Настройка статических файлов
 app.use(express.static(path.join(__dirname, 'public'), {
     setHeaders: (res, filePath) => {
         if (filePath.endsWith('.css')) {
@@ -271,17 +382,12 @@ app.use(express.static(path.join(__dirname, 'public'), {
     }
 }));
 
+// Маршруты для обслуживания страниц
 app.get('/style.css', (req, res) => {
     res.setHeader('Content-Type', 'text/css');
-    res.sendFile(path.join(__dirname, 'public', 'style.css'), (err) => {
-        if (err) {
-            console.error('Error serving style.css:', err.message);
-            res.status(404).send('CSS file not found');
-        }
-    });
+    res.sendFile(path.join(__dirname, 'public', 'style.css'));
 });
 
-// Routes
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -294,40 +400,33 @@ app.get('/game', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'game.html'));
 });
 
-// Endpoint to fetch room state
+// Эндпоинт для получения состояния комнаты
 app.get('/room/:roomId', (req, res) => {
     const roomId = sanitizeInput(req.params.roomId);
-    console.log(`HTTP request for room state: room=${roomId}`);
     db.all('SELECT name, ready, hand, language, playerId FROM players WHERE roomId = ?', [roomId], (err, players) => {
         if (err) {
-            console.error('Error fetching players for HTTP:', err.message);
-            res.status(500).json({ error: 'Server error fetching players' });
+            console.error('Error fetching players for room state:', err.message);
+            res.status(500).json({ error: 'Server error' });
             return;
         }
         db.get('SELECT roomId, trump, deck, gameTable, currentAttacker, currentDefender FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
-            if (err) {
-                console.error('Error fetching room for HTTP:', err.message);
-            }
-            if (!row) {
-                console.log(`Room ${roomId} not found for HTTP request`);
+            if (err || !row) {
+                console.error('Error fetching room state:', err?.message);
                 res.status(404).json({ error: 'Room not found' });
                 return;
             }
-            const playerNames = players.map(player => player.name);
-            const readyCount = players.filter(player => player.ready).length;
-            const totalCount = players.length;
-            console.log(`HTTP response for room ${roomId}: players=${playerNames.join(',') || 'none'}, ready=${readyCount}/${totalCount}`);
+            console.log(`Returning room state for room ${roomId}`);
             res.json({
-                players: players.map(player => ({
-                    name: player.name,
-                    ready: !!player.ready,
-                    hand: player.hand ? JSON.parse(player.hand) : [],
-                    language: player.language,
-                    playerId: player.playerId
+                players: players.map(p => ({
+                    name: p.name,
+                    ready: !!p.ready,
+                    hand: p.hand ? JSON.parse(p.hand) : [],
+                    language: p.language,
+                    playerId: p.playerId
                 })),
-                readyCount: readyCount,
-                totalCount: totalCount,
-                trump: row.trump,
+                readyCount: players.filter(p => p.ready).length,
+                totalCount: players.length,
+                trump: row.trump ? JSON.parse(row.trump) : null,
                 deckCount: row.deck ? JSON.parse(row.deck).length : 0,
                 table: row.gameTable ? JSON.parse(row.gameTable) : [],
                 currentAttacker: row.currentAttacker,
@@ -337,7 +436,7 @@ app.get('/room/:roomId', (req, res) => {
     });
 });
 
-// Create game deck
+// Логика игры
 function createDeck() {
     const suits = ['Hearts', 'Diamonds', 'Clubs', 'Spades'];
     const ranks = ['6', '7', '8', '9', '10', 'Jack', 'Queen', 'King', 'Ace'];
@@ -347,11 +446,10 @@ function createDeck() {
             deck.push({ rank, suit });
         }
     }
-    console.log('Deck created:', deck.length, 'cards');
+    console.log('Created new deck with 36 cards');
     return deck;
 }
 
-// Shuffle deck
 function shuffleDeck(deck) {
     for (let i = deck.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -360,7 +458,6 @@ function shuffleDeck(deck) {
     console.log('Deck shuffled');
 }
 
-// Find lowest trump card for first attacker
 function findLowestTrumpCard(players, trump) {
     const rankOrder = ['6', '7', '8', '9', '10', 'Jack', 'Queen', 'King', 'Ace'];
     let lowestTrumpCard = null;
@@ -382,22 +479,19 @@ function findLowestTrumpCard(players, trump) {
         }
     });
 
+    console.log(`Lowest trump card: ${lowestTrumpCard ? JSON.stringify(lowestTrumpCard) : 'none'}, first attacker: ${firstAttacker}`);
     return { lowestTrumpCard, firstAttacker };
 }
 
-// Start turn timer
 function startTurnTimer(roomId) {
     clearTurnTimer(roomId);
     const timer = setTimeout(() => {
         db.get('SELECT currentDefender, gameEnded FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
             if (err || !row) {
-                console.error('Error fetching currentDefender for timer:', err?.message);
+                console.error('Error fetching defender for timer:', err?.message);
                 return;
             }
-            if (row.gameEnded) {
-                console.log(`Room ${roomId} has ended, skipping timer action`);
-                return;
-            }
+            if (row.gameEnded) return;
             db.all('SELECT DISTINCT playerId FROM players WHERE roomId = ? AND isDisconnected = 0', [roomId], (err, players) => {
                 if (err) {
                     console.error('Error fetching players for timer:', err.message);
@@ -408,8 +502,8 @@ function startTurnTimer(roomId) {
                     return;
                 }
                 const playerIds = players.map(p => p.playerId);
-                const currentIndex = playerIds.indexOf(row.currentDefender);
-                const nextAttackerIndex = (currentIndex + 1) % playerIds.length;
+                const currentDefenderIndex = playerIds.indexOf(row.currentDefender);
+                const nextAttackerIndex = (currentDefenderIndex + 1) % playerIds.length;
                 const nextDefenderIndex = (nextAttackerIndex + 1) % playerIds.length;
                 const newAttacker = playerIds[nextAttackerIndex];
                 const newDefender = playerIds[nextDefenderIndex] || playerIds[0];
@@ -418,12 +512,11 @@ function startTurnTimer(roomId) {
                     [JSON.stringify([]), newAttacker, newDefender, Date.now(), roomId],
                     err => {
                         if (err) {
-                            console.error('Error updating turn on timeout:', err.message);
-                            return;
+                            console.error('Error updating turn after timeout:', err.message);
                         }
-                        console.log(`Turn timed out in room ${roomId}, new attacker: ${newAttacker}, new defender: ${newDefender}`);
                         io.to(roomId).emit('errorMessage', 'Turn timed out');
                         updateGameState(roomId);
+                        console.log(`Turn timed out in room ${roomId}, new attacker: ${newAttacker}, new defender: ${newDefender}`);
                     }
                 );
             });
@@ -433,46 +526,42 @@ function startTurnTimer(roomId) {
     const room = io.sockets.adapter.rooms.get(roomId);
     if (room) {
         room.timer = timer;
-        console.log(`Timer set for room ${roomId}`);
-    } else {
-        console.warn(`Room ${roomId} not found in adapter.rooms, timer not set`);
+        console.log(`Started 30-second timer for room ${roomId}`);
     }
 }
 
-// Clear turn timer
 function clearTurnTimer(roomId) {
     const room = io.sockets.adapter.rooms.get(roomId);
     if (room && room.timer) {
         clearTimeout(room.timer);
         delete room.timer;
-        console.log(`Timer cleared for room ${roomId}`);
+        console.log(`Cleared timer for room ${roomId}`);
     }
 }
 
-// Update room state (for room.html)
 function updateRoomState(roomId) {
     db.all('SELECT name, ready, isDisconnected, language, playerId, id, socketIds FROM players WHERE roomId = ?', [roomId], (err, players) => {
         if (err) {
-            console.error('Error fetching players:', err.message);
-            io.to(roomId).emit('errorMessage', 'Server error fetching players.');
+            console.error('Error fetching players for room state update:', err.message);
+            io.to(roomId).emit('errorMessage', 'Server error');
             return;
         }
-        const readyCount = players.filter(player => player.ready).length;
-        const totalCount = players.length;
+        const readyCount = players.filter(p => p.ready).length;
         const activeCount = players.filter(p => !p.isDisconnected).length;
         db.run('UPDATE rooms SET activePlayers = ? WHERE roomId = ?', [activeCount, roomId], err => {
-            if (err) console.error('Error updating activePlayers:', err.message);
+            if (err) {
+                console.error('Error updating active players count:', err.message);
+            }
         });
-        console.log(`Updating room ${roomId}: players=${players.map(p => p.name).join(',') || 'none'}, ready=${readyCount}/${totalCount}, active=${activeCount}`);
         io.to(roomId).emit('updateRoom', {
-            players: players.map(player => ({
-                name: player.name,
-                ready: !!player.ready,
-                playerId: player.playerId
+            players: players.map(p => ({
+                name: p.name,
+                ready: !!p.ready,
+                playerId: p.playerId
             })),
             readyCount,
-            totalCount,
-            playerLanguages: players.map(player => ({ name: player.name, language: player.language }))
+            totalCount: players.length,
+            playerLanguages: players.map(p => ({ name: p.name, language: p.language }))
         });
         players.forEach(player => {
             const socketIds = player.socketIds ? JSON.parse(player.socketIds) : [];
@@ -484,136 +573,127 @@ function updateRoomState(roomId) {
                 });
             });
         });
+        console.log(`Updated room state for ${roomId}: ${activeCount} active players, ${readyCount} ready`);
     });
 }
 
-// Update game state (for game.html)
 function updateGameState(roomId) {
     db.get('SELECT trump, deck, gameTable, currentAttacker, currentDefender, gameEnded FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
-        if (err) {
-            console.error('Error fetching room for game:', err.message);
-            io.to(roomId).emit('errorMessage', 'Server error fetching game state.');
+        if (err || !row) {
+            console.error('Error fetching room for game state:', err?.message);
+            io.to(roomId).emit('errorMessage', 'Game room does not exist');
             return;
         }
-        if (!row) {
-            console.log(`Room ${roomId} not found for game state`);
-            io.to(roomId).emit('errorMessage', 'Game room does not exist.');
-            return;
-        }
-        if (row.gameEnded) {
-            console.log(`Room ${roomId} has ended, skipping game state update`);
-            return;
-        }
+        if (row.gameEnded) return;
         db.all('SELECT id, name, hand, playerId, isDisconnected, language, socketIds FROM players WHERE roomId = ?', [roomId], (err, players) => {
             if (err) {
-                console.error('Error fetching players for game:', err.message);
-                io.to(roomId).emit('errorMessage', 'Server error fetching game state.');
+                console.error('Error fetching players for game state:', err.message);
+                io.to(roomId).emit('errorMessage', 'Server error');
                 return;
             }
             const activePlayers = players.filter(p => !p.isDisconnected);
-            db.run('UPDATE rooms SET activePlayers = ? WHERE roomId = ?', [activePlayers.length, roomId], err => {
-                if (err) console.error('Error updating activePlayers:', err.message);
-            });
-            if (activePlayers.length < 2 && row.trump) {
+            db.run('UPDATE rooms SET activePlayers = ? WHERE roomId = ?', [activePlayers.length, roomId]);
+            if (activePlayers.length < 2) {
                 handleSinglePlayerGame(roomId);
                 return;
             }
+            const playerOrder = activePlayers.map(p => ({
+                playerId: p.playerId,
+                name: p.name,
+                isCurrentAttacker: p.playerId === row.currentAttacker,
+                isCurrentDefender: p.playerId === row.currentDefender
+            }));
             const gameState = {
-                players: players.map(player => ({
-                    id: player.playerId,
-                    name: player.name,
-                    hand: player.hand ? JSON.parse(player.hand) : [],
-                    isDisconnected: !!player.isDisconnected,
-                    language: player.language
+                players: players.map(p => ({
+                    id: p.playerId,
+                    name: p.name,
+                    hand: p.hand ? JSON.parse(p.hand) : [],
+                    isDisconnected: !!p.isDisconnected,
+                    language: p.language
                 })),
                 trump: row.trump ? JSON.parse(row.trump) : null,
                 deckCount: row.deck ? JSON.parse(row.deck).length : 0,
                 table: row.gameTable ? JSON.parse(row.gameTable) : [],
                 currentAttacker: row.currentAttacker,
-                currentDefender: row.currentDefender
+                currentDefender: row.currentDefender,
+                playerOrder
             };
-            console.log(`Updating game ${roomId}: players=${players.map(p => p.name).join(',') || 'none'}, trump=${JSON.stringify(gameState.trump)}, deck=${gameState.deckCount}, table=${JSON.stringify(gameState.table)}, attacker=${row.currentAttacker}, defender=${row.currentDefender}`);
+            const tableHasCards = gameState.table.some(pair => pair.attack && !pair.defense);
+            const buttonState = {
+                showEndTurn: tableHasCards && !gameState.table.some(pair => !pair.defense),
+                showTakeCards: tableHasCards
+            };
             players.forEach(player => {
                 const socketIds = player.socketIds ? JSON.parse(player.socketIds) : [];
                 socketIds.forEach(socketId => {
                     io.to(socketId).emit('updateGame', gameState);
+                    io.to(socketId).emit('buttonState', buttonState);
                 });
             });
             checkGameEnd(roomId);
-            db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId], err => {
-                if (err) console.error('Error updating lastActivity:', err.message);
-            });
+            db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId]);
+            console.log(`Updated game state for room ${roomId}`);
         });
     });
 }
 
-// Start game
 function startGame(roomId) {
-    console.log(`Attempting to start game in room ${roomId}`);
     db.get('SELECT trump FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
         if (err) {
-            console.error('Error checking game state:', err.message);
-            io.to(roomId).emit('errorMessage', 'Server error checking game state.');
+            console.error('Error checking game start:', err.message);
+            io.to(roomId).emit('errorMessage', 'Server error');
             return;
         }
         if (row && row.trump) {
-            console.log(`Game already started in room ${roomId}, updating state`);
             updateGameState(roomId);
             return;
         }
         db.all('SELECT id, playerId, name, ready, isDisconnected, socketIds, hand FROM players WHERE roomId = ?', [roomId], (err, players) => {
             if (err) {
-                console.error('Error fetching players for game:', err.message);
-                io.to(roomId).emit('errorMessage', 'Server error starting game.');
+                console.error('Error fetching players for game start:', err.message);
+                io.to(roomId).emit('errorMessage', 'Server error');
                 return;
             }
-            const activePlayers = players.filter(player => !player.isDisconnected);
+            const activePlayers = players.filter(p => !p.isDisconnected);
             if (activePlayers.length < 2) {
-                console.log(`Not enough active players to start game in room ${roomId}: ${activePlayers.length}`);
-                io.to(roomId).emit('errorMessage', 'Minimum 2 players required to start game.');
+                io.to(roomId).emit('errorMessage', 'Minimum 2 players required to start');
                 return;
             }
-            const readyCount = activePlayers.filter(player => player.ready).length;
+            if (activePlayers.length > 4) {
+                io.to(roomId).emit('errorMessage', 'Maximum 4 players allowed');
+                return;
+            }
+            const readyCount = activePlayers.filter(p => p.ready).length;
             if (readyCount !== activePlayers.length) {
-                console.log(`Not all active players ready in room ${roomId}: ${readyCount}/${activePlayers.length}`);
-                io.to(roomId).emit('errorMessage', 'All active players must be ready to start game.');
+                io.to(roomId).emit('errorMessage', 'All players must be ready to start');
                 return;
             }
 
             const deck = createDeck();
             shuffleDeck(deck);
-
             const trumpCard = deck[Math.floor(Math.random() * deck.length)];
             const trump = { card: trumpCard, suit: trumpCard.suit };
-            deck.splice(deck.indexOf(trumpCard), 1); // Remove trump from current position
-            deck.push(trumpCard); // Place trump at the end
+            deck.splice(deck.indexOf(trumpCard), 1);
+            deck.push(trumpCard);
 
             activePlayers.forEach(player => {
                 const hand = deck.splice(0, 6);
-                db.run(
-                    'UPDATE players SET hand = ? WHERE playerId = ?',
-                    [JSON.stringify(hand), player.playerId],
-                    (err) => {
-                        if (err) console.error('Error updating player hand:', err.message);
-                        else console.log(`Hand assigned to player ${player.name} in room ${roomId}`);
+                db.run('UPDATE players SET hand = ? WHERE playerId = ?', [JSON.stringify(hand), player.playerId], err => {
+                    if (err) {
+                        console.error(`Error updating hand for player ${player.playerId}:`, err.message);
                     }
-                );
+                });
             });
 
-            // Determine first attacker
             const { lowestTrumpCard, firstAttacker } = findLowestTrumpCard(activePlayers, trump.suit);
             let currentAttacker, currentDefender;
+            const activePlayerIds = activePlayers.map(p => p.playerId);
 
             if (firstAttacker) {
-                console.log(`First attacker in room ${roomId}: playerId=${firstAttacker}, lowest trump card=${lowestTrumpCard.rank} of ${lowestTrumpCard.suit}`);
                 currentAttacker = firstAttacker;
-                const activePlayerIds = activePlayers.map(p => p.playerId);
                 const attackerIndex = activePlayerIds.indexOf(firstAttacker);
-                const defenderIndex = (attackerIndex + 1) % activePlayerIds.length;
-                currentDefender = activePlayerIds[defenderIndex];
+                currentDefender = activePlayerIds[(attackerIndex + 1) % activePlayerIds.length];
             } else {
-                console.log(`No trump cards found in room ${roomId}, selecting random attacker`);
-                const activePlayerIds = activePlayers.map(p => p.playerId);
                 currentAttacker = activePlayerIds[0];
                 currentDefender = activePlayerIds[1];
             }
@@ -623,70 +703,48 @@ function startGame(roomId) {
                 [JSON.stringify(trump), JSON.stringify(deck), JSON.stringify([]), currentAttacker, currentDefender, Date.now(), activePlayers.length, roomId],
                 (err) => {
                     if (err) {
-                        console.error('Error updating room:', err.message);
-                        io.to(roomId).emit('errorMessage', 'Server error setting game state.');
+                        console.error('Error starting game:', err.message);
+                        io.to(roomId).emit('errorMessage', 'Server error');
                         return;
                     }
-                    console.log(`Game started in room ${roomId}, trump: ${JSON.stringify(trump)}, attacker: ${currentAttacker}, defender: ${currentDefender}, deck: ${deck.length}`);
                     io.to(roomId).emit('startGame', { trump, currentAttacker, currentDefender });
                     updateGameState(roomId);
-                    const room = io.sockets.adapter.rooms.get(roomId);
-                    console.log(`Room ${roomId} sockets before timer: ${room ? Array.from(room).join(',') : 'none'}`);
-                    if (!room) {
-                        console.warn(`Room ${roomId} not found in adapter.rooms, joining active players`);
-                        activePlayers.forEach(player => {
-                            const socketIds = player.socketIds ? JSON.parse(player.socketIds) : [];
-                            socketIds.forEach(socketId => {
-                                io.sockets.sockets.get(socketId)?.join(roomId);
-                                console.log(`Socket ${socketId} joined room ${roomId}`);
-                            });
-                        });
-                    }
                     startTurnTimer(roomId);
+                    console.log(`Game started in room ${roomId} with trump ${trump.suit}`);
                 }
             );
         });
     });
 }
 
-// Validate card play
 function isValidAttackCard(card, table, trump) {
     if (!table.length) return true;
-    return table.some(pair => pair.attack.rank === card.rank);
+    const valid = table.some(pair => pair.attack.rank === card.rank);
+    console.log(`Checking attack card ${JSON.stringify(card)}: ${valid ? 'valid' : 'invalid'}`);
+    return valid;
 }
 
 function isValidDefenseCard(defenseCard, attackCard, trump) {
     const rankOrder = ['6', '7', '8', '9', '10', 'Jack', 'Queen', 'King', 'Ace'];
     if (defenseCard.suit === attackCard.suit) {
-        return rankOrder.indexOf(defenseCard.rank) > rankOrder.indexOf(attackCard.rank);
+        const valid = rankOrder.indexOf(defenseCard.rank) > rankOrder.indexOf(attackCard.rank);
+        console.log(`Checking defense card ${JSON.stringify(defenseCard)} against ${JSON.stringify(attackCard)}: ${valid ? 'valid' : 'invalid'}`);
+        return valid;
     }
-    return defenseCard.suit === trump;
+    const valid = defenseCard.suit === trump;
+    console.log(`Checking defense card ${JSON.stringify(defenseCard)} against ${JSON.stringify(attackCard)} with trump ${trump}: ${valid ? 'valid' : 'invalid'}`);
+    return valid;
 }
 
-// Draw cards
 function drawCards(roomId, playerIds, callback) {
     db.get('SELECT deck, gameEnded FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
-        if (err) {
-            console.error('Error fetching deck:', err.message);
-            return;
-        }
-        if (!row) {
-            console.log(`Room ${roomId} does not exist for drawCards`);
-            return;
-        }
-        if (row.gameEnded) {
-            console.log(`Room ${roomId} has ended, skipping drawCards`);
-            return;
-        }
+        if (err || !row) return;
+        if (row.gameEnded) return;
         let deck = row.deck ? JSON.parse(row.deck) : [];
         let updates = [];
         playerIds.forEach(playerId => {
             db.get('SELECT hand, isDisconnected FROM players WHERE playerId = ?', [playerId], (err, player) => {
-                if (err) {
-                    console.error('Error fetching player hand:', err.message);
-                    return;
-                }
-                if (player.isDisconnected) return;
+                if (err || !player || player.isDisconnected) return;
                 let hand = player.hand ? JSON.parse(player.hand) : [];
                 while (hand.length < 6 && deck.length > 0) {
                     hand.push(deck.shift());
@@ -695,38 +753,32 @@ function drawCards(roomId, playerIds, callback) {
                 if (updates.length === playerIds.length) {
                     updates.forEach(update => {
                         db.run('UPDATE players SET hand = ? WHERE playerId = ?', [JSON.stringify(update.hand), update.id], err => {
-                            if (err) console.error('Error updating hand:', err.message);
+                            if (err) {
+                                console.error(`Error updating hand for player ${update.id}:`, err.message);
+                            }
                         });
                     });
                     db.run('UPDATE rooms SET deck = ?, lastActivity = ? WHERE roomId = ?', [JSON.stringify(deck), Date.now(), roomId], err => {
-                        if (err) console.error('Error updating deck:', err.message);
-                        callback();
+                        if (err) {
+                            console.error('Error updating deck:', err.message);
+                        }
                     });
+                    callback();
+                    console.log(`Cards drawn for players ${playerIds.join(', ')} in room ${roomId}`);
                 }
             });
         });
     });
 }
 
-// Check game end
 function checkGameEnd(roomId) {
     db.get('SELECT deck, gameEnded FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
-        if (err) {
-            console.error('Error fetching deck for game end:', err.message);
-            return;
-        }
-        if (!row) {
-            console.log(`Room ${roomId} not found for game end check`);
-            return;
-        }
-        if (row.gameEnded) {
-            console.log(`Room ${roomId} already ended, skipping game end check`);
-            return;
-        }
+        if (err || !row || row.gameEnded) return;
         const deck = row.deck ? JSON.parse(row.deck) : [];
         db.all('SELECT playerId, name, hand, isDisconnected FROM players WHERE roomId = ?', [roomId], (err, players) => {
             if (err) {
                 console.error('Error checking game end:', err.message);
+                return;
             }
             const activePlayers = players.filter(p => !p.isDisconnected);
             if (activePlayers.length < 2) {
@@ -735,37 +787,66 @@ function checkGameEnd(roomId) {
             }
             const winners = activePlayers.filter(p => JSON.parse(p.hand || '[]').length === 0);
             if (deck.length === 0 && winners.length > 0) {
-                const winnerNames = winners.map(p => p.name).join(', ');
-                console.log(`Game over in room ${roomId}: Winners: ${winnerNames}`);
                 db.run('UPDATE rooms SET gameEnded = 1 WHERE roomId = ?', [roomId], err => {
-                    if (err) console.error('Error marking game as ended:', err.message);
-                    io.to(roomId).emit('gameOver', { winners: winners.map(p => p.name) });
-                    deleteRoom(roomId);
+                    if (err) {
+                        console.error('Error marking game as ended:', err.message);
+                    }
                 });
+                winners.forEach(winner => {
+                    db.run('UPDATE players SET wins = wins + 1 WHERE playerId = ?', [winner.playerId]);
+                });
+                activePlayers.forEach(player => {
+                    if (!winners.some(w => w.playerId === player.playerId)) {
+                        db.run('UPDATE players SET losses = losses + 1 WHERE playerId = ?', [player.playerId]);
+                    }
+                });
+                io.to(roomId).emit('gameOver', { winners: winners.map(p => p.name) });
+                deleteRoom(roomId);
+                console.log(`Game ended in room ${roomId}, winners: ${winners.map(p => p.name).join(', ')}`);
             }
         });
     });
 }
 
-// Delete room
 function deleteRoom(roomId) {
     clearTurnTimer(roomId);
     db.run('UPDATE rooms SET gameEnded = 1 WHERE roomId = ?', [roomId], err => {
-        if (err) console.error('Error marking room as ended:', err.message);
-        db.run('DELETE FROM players WHERE roomId = ?', [roomId], err => {
-            if (err) console.error('Error deleting players:', err.message);
-            db.run('DELETE FROM rooms WHERE roomId = ?', [roomId], err => {
-                if (err) console.error('Error deleting room:', err.message);
-                console.log(`Room ${roomId} deleted after game end`);
-                io.to(roomId).emit('roomDeleted', 'Game has ended and room was deleted.');
-            });
-        });
+        if (err) {
+            console.error('Error marking room as ended:', err.message);
+        }
     });
+    db.run('DELETE FROM players WHERE roomId = ?', [roomId], err => {
+        if (err) {
+            console.error('Error deleting players for room:', err.message);
+        }
+    });
+    db.run('DELETE FROM rooms WHERE roomId = ?', [roomId], err => {
+        if (err) {
+            console.error('Error deleting room:', err.message);
+        }
+    });
+    io.to(roomId).emit('roomDeleted', 'Game ended and room deleted');
+    console.log(`Room ${roomId} deleted`);
 }
 
-// Socket.io event handlers
+// Логирование действий игрока
+function logPlayerAction(roomId, playerId, action, card = null) {
+    db.run(
+        'INSERT INTO game_history (roomId, playerId, action, card, timestamp) VALUES (?, ?, ?, ?, ?)',
+        [roomId, playerId, action, card ? JSON.stringify(card) : null, Date.now()],
+        err => {
+            if (err) {
+                console.error('Error logging player action:', err.message);
+            } else {
+                console.log(`Logged action ${action} for player ${playerId} in room ${roomId}`);
+            }
+        }
+    );
+}
+
+// Обработка Socket.IO событий
 io.on('connection', (socket) => {
-    console.log(`New user connected: socket=${socket.id}`);
+    console.log(`New socket connected: ${socket.id}`);
 
     socket.on('createRoom', (data) => {
         let playerName, playerId, language;
@@ -773,39 +854,28 @@ io.on('connection', (socket) => {
             playerName = data;
             playerId = uuidv4();
             language = 'en';
-            console.log(`Received old createRoom format: playerName=${playerName}`);
-        } else if (typeof data === 'object' && data.playerName && data.playerName.trim()) {
+        } else {
             playerName = data.playerName;
             playerId = data.playerId || uuidv4();
             language = sanitizeLanguage(data.language || 'en');
-        } else {
-            console.error('Invalid createRoom data:', data);
-            socket.emit('errorMessage', 'Invalid data.');
-            return;
         }
-
-        playerName = sanitizeInput(playerName ? playerName.trim() : '');
+        playerName = sanitizeInput(playerName);
         playerId = sanitizeInput(playerId);
-        console.log(`Request to create room: player=${playerName}, playerId=${playerId}, language=${language}, socket=${socket.id}`);
-        if (!playerName || playerName === 'undefined') {
-            socket.emit('errorMessage', 'Enter a valid name.');
+        if (!playerName) {
+            socket.emit('errorMessage', 'Invalid name');
             socket.emit('setPlayerId', playerId);
+            console.log(`Invalid name provided for room creation: ${playerName}`);
             return;
         }
         db.get('SELECT playerId FROM players WHERE playerId = ?', [playerId], (err, row) => {
-            if (err) {
-                console.error('Error checking playerId:', err.message);
-                socket.emit('errorMessage', 'Server error.');
-                return;
-            }
             if (row) {
                 playerId = uuidv4();
-                socket.emit('setPlayerId', playerId);
-                console.log(`Duplicate playerId detected, assigned new playerId: ${playerId}`);
+                console.log(`PlayerId ${playerId} already exists, generated new one`);
             }
             generateRoomCode((roomId) => {
                 if (!roomId) {
-                    socket.emit('errorMessage', 'Failed to generate room code.');
+                    socket.emit('errorMessage', 'Failed to generate room code');
+                    console.log('Failed to generate room code');
                     return;
                 }
                 db.run(
@@ -813,36 +883,34 @@ io.on('connection', (socket) => {
                     [roomId, Date.now(), Date.now(), 0],
                     (err) => {
                         if (err) {
+                            socket.emit('errorMessage', 'Server error');
                             console.error('Error creating room:', err.message);
-                            socket.emit('errorMessage', 'Server error.');
                             return;
                         }
-                        db.run('DELETE FROM players WHERE id = ?', [socket.id], err => {
-                            if (err) console.error('Error cleaning old socket:', err.message);
-                            cleanDuplicatePlayers(roomId, playerName, socket.id, playerId, (err) => {
-                                if (err) {
-                                    socket.emit('errorMessage', 'Server error cleaning duplicates.');
-                                    return;
-                                }
-                                db.run(
-                                    'INSERT INTO players (id, roomId, playerId, name, ready, joinedAt, isDisconnected, lastDisconnectedAt, language, socketIds) VALUES (?, ?, ?, ?, 0, ?, 0, NULL, ?, ?)',
-                                    [socket.id, roomId, playerId, playerName, Date.now(), language, JSON.stringify([socket.id])],
-                                    (err) => {
-                                        if (err) {
-                                            console.error('Error adding creator:', err.message);
-                                            socket.emit('errorMessage', 'Server error.');
-                                            return;
-                                        }
-                                        console.log(`Room ${roomId} created, player ${playerName} added with playerId ${playerId}, language ${language}, socket=${socket.id}`);
-                                        socket.join(roomId);
-                                        console.log(`Socket ${socket.id} joined room ${roomId}`);
-                                        socket.emit('roomCreated', { roomId, playerId, language, playerName });
-                                        socket.emit('roomJoined', { roomId, playerId, language, playerName });
-                                        socket.emit('playerStatus', { playerId, ready: false, isDisconnected: false });
-                                        updateRoomState(roomId);
+                        db.run('DELETE FROM players WHERE id = ?', [socket.id]);
+                        cleanDuplicatePlayers(roomId, playerName, socket.id, playerId, (err) => {
+                            if (err) {
+                                socket.emit('errorMessage', 'Server error');
+                                console.error('Error cleaning duplicates:', err.message);
+                                return;
+                            }
+                            db.run(
+                                'INSERT INTO players (id, roomId, playerId, name, ready, joinedAt, isDisconnected, language, socketIds) VALUES (?, ?, ?, ?, 0, ?, 0, ?, ?)',
+                                [socket.id, roomId, playerId, playerName, Date.now(), language, JSON.stringify([socket.id])],
+                                (err) => {
+                                    if (err) {
+                                        socket.emit('errorMessage', 'Server error');
+                                        console.error('Error inserting player:', err.message);
+                                        return;
                                     }
-                                );
-                            });
+                                    socket.join(roomId);
+                                    socket.emit('roomCreated', { roomId, playerId, language, playerName });
+                                    socket.emit('roomJoined', { roomId, playerId, language, playerName });
+                                    socket.emit('playerStatus', { playerId, ready: false, isDisconnected: false });
+                                    updateRoomState(roomId);
+                                    console.log(`Player ${playerName} created and joined room ${roomId}`);
+                                }
+                            );
                         });
                     }
                 );
@@ -851,145 +919,108 @@ io.on('connection', (socket) => {
     });
 
     socket.on('joinRoom', (data) => {
-        let roomId, playerName, playerId, language;
-        if (typeof data === 'object' && data.roomId && data.playerName && data.playerName.trim()) {
-            roomId = data.roomId;
-            playerName = data.playerName;
-            playerId = data.playerId || uuidv4();
-            language = sanitizeLanguage(data.language || 'en');
-        } else {
-            console.error('Invalid joinRoom data:', data);
-            socket.emit('errorMessage', 'Invalid data.');
+        const { roomId, playerName, playerId, language } = data;
+        const sanitizedRoomId = sanitizeInput(roomId);
+        const sanitizedPlayerName = sanitizeInput(playerName);
+        const sanitizedPlayerId = sanitizeInput(playerId || uuidv4());
+        const sanitizedLanguage = sanitizeLanguage(language || 'en');
+        if (!sanitizedRoomId || !sanitizedPlayerName) {
+            socket.emit('errorMessage', 'Invalid room ID or name');
+            socket.emit('setPlayerId', sanitizedPlayerId);
+            console.log(`Invalid room ID or name for join: ${sanitizedRoomId}, ${sanitizedPlayerName}`);
             return;
         }
-
-        roomId = sanitizeInput(roomId ? roomId.trim().toLowerCase() : '');
-        playerName = sanitizeInput(playerName ? playerName.trim() : '');
-        playerId = sanitizeInput(playerId);
-        console.log(`Request to join room: room=${roomId}, player=${playerName}, playerId=${playerId}, language=${language}, socket=${socket.id}`);
-        if (!roomId || !playerName || playerName === 'undefined') {
-            socket.emit('errorMessage', 'Invalid room ID or name.');
-            socket.emit('setPlayerId', playerId);
-            return;
-        }
-        db.get('SELECT roomId FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
-            if (err) {
-                console.error('Error checking room:', err.message);
-                socket.emit('errorMessage', 'Server error.');
-                return;
-            }
+        db.get('SELECT roomId FROM rooms WHERE roomId = ?', [sanitizedRoomId], (err, row) => {
             if (!row) {
-                socket.emit('errorMessage', 'Room does not exist.');
-                socket.emit('setPlayerId', playerId);
+                socket.emit('errorMessage', 'Room does not exist');
+                socket.emit('setPlayerId', sanitizedPlayerId);
+                console.log(`Room ${sanitizedRoomId} does not exist`);
                 return;
             }
-            db.get('SELECT name, playerId, id, isDisconnected, hand, lastDisconnectedAt, language, ready, socketIds FROM players WHERE roomId = ? AND playerId = ?', [roomId, playerId], (err, row) => {
-                if (err) {
-                    console.error('Error checking player:', err.message);
-                    socket.emit('errorMessage', 'Server error.');
-                    return;
-                }
+            db.get('SELECT name, playerId, isDisconnected, hand, language, ready, socketIds FROM players WHERE roomId = ? AND playerId = ?', [sanitizedRoomId, sanitizedPlayerId], (err, row) => {
                 if (row) {
-                    if (row.name !== playerName) {
-                        socket.emit('errorMessage', 'Player name mismatch for this ID.');
+                    if (row.name !== sanitizedPlayerName) {
+                        socket.emit('errorMessage', 'Name mismatch');
+                        console.log(`Name mismatch for playerId ${sanitizedPlayerId}: ${row.name} vs ${sanitizedPlayerName}`);
                         return;
                     }
                     if (!row.isDisconnected) {
-                        addSocketId(playerId, socket.id, (err) => {
+                        addSocketId(sanitizedPlayerId, socket.id, (err) => {
                             if (err) {
-                                socket.emit('errorMessage', 'Server error adding socket.');
+                                socket.emit('errorMessage', 'Server error');
+                                console.error('Error adding socketId:', err.message);
                                 return;
                             }
-                            console.log(`Player ${playerName} added socket ${socket.id} to existing playerId ${playerId} in room ${roomId}`);
-                            socket.join(roomId);
-                            socket.emit('roomJoined', { roomId, playerId, language: row.language, playerName });
-                            socket.emit('playerStatus', { playerId, ready: !!row.ready, isDisconnected: false });
-                            updateRoomState(roomId);
-                            db.get('SELECT trump FROM rooms WHERE roomId = ?', [roomId], (err, room) => {
-                                if (err) {
-                                    console.error('Error checking game state:', err.message);
-                                    return;
-                                }
-                                if (room && room.trump) {
-                                    updateGameState(roomId);
-                                }
+                            socket.join(sanitizedRoomId);
+                            socket.emit('roomJoined', { roomId: sanitizedRoomId, playerId: sanitizedPlayerId, language: row.language, playerName: sanitizedPlayerName });
+                            socket.emit('playerStatus', { playerId: sanitizedPlayerId, ready: !!row.ready, isDisconnected: false });
+                            updateRoomState(sanitizedRoomId);
+                            db.get('SELECT trump FROM rooms WHERE roomId = ?', [sanitizedRoomId], (err, room) => {
+                                if (room && room.trump) updateGameState(sanitizedRoomId);
                             });
+                            console.log(`Player ${sanitizedPlayerName} rejoined room ${sanitizedRoomId}`);
                         });
                         return;
-                    } else {
-                        db.run(
-                            'UPDATE players SET id = ?, isDisconnected = 0, lastDisconnectedAt = NULL, language = ?, socketIds = ? WHERE roomId = ? AND playerId = ?',
-                            [socket.id, language, JSON.stringify([socket.id]), roomId, playerId],
-                            (err) => {
-                                if (err) {
-                                    console.error('Error updating player on reconnect:', err.message);
-                                    socket.emit('errorMessage', 'Server error.');
-                                    return;
-                                }
-                                console.log(`Player ${playerName} reconnected to room ${roomId}, playerId: ${playerId}, socket: ${socket.id}`);
-                                socket.join(roomId);
-                                socket.emit('roomJoined', { roomId, playerId, language: row.language, playerName });
-                                socket.emit('playerStatus', { playerId, ready: !!row.ready, isDisconnected: false });
-                                io.to(roomId).emit('playerReconnected', { playerName });
-                                updateRoomState(roomId);
-                                db.get('SELECT trump FROM rooms WHERE roomId = ?', [roomId], (err, room) => {
-                                    if (err) {
-                                        console.error('Error checking game state:', err.message);
-                                        return;
-                                    }
-                                    if (room && room.trump) {
-                                        updateGameState(roomId);
-                                    }
-                                });
+                    }
+                    db.run(
+                        'UPDATE players SET id = ?, isDisconnected = 0, lastDisconnectedAt = NULL, language = ?, socketIds = ? WHERE roomId = ? AND playerId = ?',
+                        [socket.id, sanitizedLanguage, JSON.stringify([socket.id]), sanitizedRoomId, sanitizedPlayerId],
+                        (err) => {
+                            if (err) {
+                                socket.emit('errorMessage', 'Server error');
+                                console.error('Error updating player:', err.message);
+                                return;
                             }
-                        );
-                        return;
-                    }
+                            socket.join(sanitizedRoomId);
+                            socket.emit('roomJoined', { roomId: sanitizedRoomId, playerId: sanitizedPlayerId, language: row.language, playerName: sanitizedPlayerName });
+                            socket.emit('playerStatus', { playerId: sanitizedPlayerId, ready: !!row.ready, isDisconnected: false });
+                            io.to(sanitizedRoomId).emit('playerReconnected', { playerName: sanitizedPlayerName });
+                            updateRoomState(sanitizedRoomId);
+                            db.get('SELECT trump FROM rooms WHERE roomId = ?', [sanitizedRoomId], (err, room) => {
+                                if (room && room.trump) updateGameState(sanitizedRoomId);
+                            });
+                            console.log(`Player ${sanitizedPlayerName} reconnected to room ${sanitizedRoomId}`);
+                        }
+                    );
+                    return;
                 }
-                restrictPlayerJoin(roomId, playerName, playerId, socket.id, (canJoin) => {
+                restrictPlayerJoin(sanitizedRoomId, sanitizedPlayerName, sanitizedPlayerId, socket.id, (canJoin) => {
                     if (!canJoin) {
-                        socket.emit('errorMessage', 'Player with this name already active with a different ID.');
+                        socket.emit('errorMessage', 'Player already active');
+                        console.log(`Player ${sanitizedPlayerName} already active in room ${sanitizedRoomId}`);
                         return;
                     }
-                    cleanDuplicatePlayers(roomId, playerName, socket.id, playerId, (err) => {
+                    cleanDuplicatePlayers(sanitizedRoomId, sanitizedPlayerName, socket.id, sanitizedPlayerId, (err) => {
                         if (err) {
-                            socket.emit('errorMessage', 'Server error cleaning duplicates.');
+                            socket.emit('errorMessage', 'Server error');
+                            console.error('Error cleaning duplicates:', err.message);
                             return;
                         }
-                        db.run('DELETE FROM players WHERE id = ?', [socket.id], err => {
-                            if (err) console.error('Error cleaning old socket:', err.message);
-                            db.get('SELECT COUNT(*) as count FROM players WHERE roomId = ?', [roomId], (err, row) => {
-                                if (err) {
-                                    console.error('Error counting players:', err.message);
-                                    socket.emit('errorMessage', 'Server error.');
-                                    return;
-                                }
-                                if (row.count >= 2) {
-                                    socket.emit('errorMessage', 'Room is full.');
-                                    socket.emit('setPlayerId', playerId);
-                                    return;
-                                }
-                                socket.join(roomId);
-                                console.log(`Socket ${socket.id} joined room ${roomId}`);
-                                db.run(
-                                    'INSERT INTO players (id, roomId, playerId, name, ready, joinedAt, isDisconnected, lastDisconnectedAt, language, socketIds) VALUES (?, ?, ?, ?, 0, ?, 0, NULL, ?, ?)',
-                                    [socket.id, roomId, playerId, playerName, Date.now(), language, JSON.stringify([socket.id])],
-                                    (err) => {
-                                        if (err) {
-                                            console.error('Error adding player:', err.message);
-                                            socket.emit('errorMessage', 'Server error.');
-                                            return;
-                                        }
-                                        console.log(`Player ${playerName} joined room ${roomId} with playerId ${playerId}, language ${language}, socket=${socket.id}`);
-                                        socket.emit('roomJoined', { roomId, playerId, language, playerName });
-                                        socket.emit('playerStatus', { playerId, ready: false, isDisconnected: false });
-                                        updateRoomState(roomId);
-                                        db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId], err => {
-                                            if (err) console.error('Error updating lastActivity:', err.message);
-                                        });
+                        db.run('DELETE FROM players WHERE id = ?', [socket.id]);
+                        db.get('SELECT COUNT(*) as count FROM players WHERE roomId = ?', [sanitizedRoomId], (err, row) => {
+                            if (row.count >= 4) {
+                                socket.emit('errorMessage', 'Room is full');
+                                socket.emit('setPlayerId', sanitizedPlayerId);
+                                console.log(`Room ${sanitizedRoomId} is full`);
+                                return;
+                            }
+                            socket.join(sanitizedRoomId);
+                            db.run(
+                                'INSERT INTO players (id, roomId, playerId, name, ready, joinedAt, isDisconnected, language, socketIds) VALUES (?, ?, ?, ?, 0, ?, 0, ?, ?)',
+                                [socket.id, sanitizedRoomId, sanitizedPlayerId, sanitizedPlayerName, Date.now(), sanitizedLanguage, JSON.stringify([socket.id])],
+                                (err) => {
+                                    if (err) {
+                                        socket.emit('errorMessage', 'Server error');
+                                        console.error('Error inserting player:', err.message);
+                                        return;
                                     }
-                                );
-                            });
+                                    socket.emit('roomJoined', { roomId: sanitizedRoomId, playerId: sanitizedPlayerId, language: sanitizedLanguage, playerName: sanitizedPlayerName });
+                                    socket.emit('playerStatus', { playerId: sanitizedPlayerId, ready: false, isDisconnected: false });
+                                    updateRoomState(sanitizedRoomId);
+                                    db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), sanitizedRoomId]);
+                                    console.log(`Player ${sanitizedPlayerName} joined room ${sanitizedRoomId}`);
+                                }
+                            );
                         });
                     });
                 });
@@ -998,108 +1029,91 @@ io.on('connection', (socket) => {
     });
 
     socket.on('takeCards', ({ roomId, playerId, playerName }) => {
-        roomId = sanitizeInput(roomId);
-        playerName = sanitizeInput(playerName);
-        playerId = sanitizeInput(playerId);
-        console.log(`Player ${playerName} requested to take cards in room ${roomId}, playerId: ${playerId}`);
-
-        db.get('SELECT gameTable, currentDefender, deck, gameEnded FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
-            if (err) {
-                console.error('Error fetching room:', err.message);
-                socket.emit('errorMessage', 'Server error.');
-                return;
-            }
-            if (!row) {
-                console.log(`Room ${roomId} does not exist or was deleted`);
-                socket.emit('errorMessage', 'Game room does not exist.');
+        const sanitizedRoomId = sanitizeInput(roomId);
+        const sanitizedPlayerName = sanitizeInput(playerName);
+        const sanitizedPlayerId = sanitizeInput(playerId);
+        db.get('SELECT gameTable, currentDefender, deck, gameEnded FROM rooms WHERE roomId = ?', [sanitizedRoomId], (err, row) => {
+            if (err || !row) {
+                socket.emit('errorMessage', 'Game room does not exist');
+                console.log(`Room ${sanitizedRoomId} not found for takeCards`);
                 return;
             }
             if (row.gameEnded) {
-                console.log(`Room ${roomId} has ended, rejecting takeCards action`);
-                socket.emit('errorMessage', 'Game has ended.');
+                socket.emit('errorMessage', 'Game has ended');
+                console.log(`Game in room ${sanitizedRoomId} has ended`);
                 return;
             }
-            if (playerId !== row.currentDefender) {
-                socket.emit('errorMessage', 'Only defender can take cards.');
+            if (sanitizedPlayerId !== row.currentDefender) {
+                socket.emit('errorMessage', 'Only defender can take cards');
+                console.log(`Player ${sanitizedPlayerId} is not defender in room ${sanitizedRoomId}`);
                 return;
             }
-
             let table = row.gameTable ? JSON.parse(row.gameTable) : [];
-            let deck = row.deck ? JSON.parse(row.deck) : [];
             if (!table.some(pair => pair.attack && !pair.defense)) {
-                socket.emit('errorMessage', 'No cards to take.');
+                socket.emit('errorMessage', 'No cards to take');
+                console.log(`No cards to take in room ${sanitizedRoomId}`);
                 return;
             }
-
-            db.get('SELECT hand, isDisconnected FROM players WHERE playerId = ?', [playerId], (err, player) => {
+            db.get('SELECT hand, isDisconnected FROM players WHERE playerId = ?', [sanitizedPlayerId], (err, player) => {
                 if (err || !player) {
-                    console.error('Error fetching player:', err ? err.message : 'Player not found');
-                    socket.emit('errorMessage', 'Player not found.');
+                    socket.emit('errorMessage', 'Player not found');
+                    console.log(`Player ${sanitizedPlayerId} not found`);
                     return;
                 }
                 if (player.isDisconnected) {
-                    socket.emit('errorMessage', 'Cannot take cards while disconnected.');
+                    socket.emit('errorMessage', 'Cannot take cards while disconnected');
+                    console.log(`Player ${sanitizedPlayerId} is disconnected`);
                     return;
                 }
-
                 let defenderHand = player.hand ? JSON.parse(player.hand) : [];
                 table.forEach(pair => {
                     if (pair.attack) defenderHand.push(pair.attack);
                     if (pair.defense) defenderHand.push(pair.defense);
                 });
-
-                db.run('UPDATE players SET hand = ? WHERE playerId = ?', [JSON.stringify(defenderHand), playerId], err => {
+                db.run('UPDATE players SET hand = ? WHERE playerId = ?', [JSON.stringify(defenderHand), sanitizedPlayerId], err => {
                     if (err) {
                         console.error('Error updating defender hand:', err.message);
-                        socket.emit('errorMessage', 'Server error.');
+                    }
+                });
+                table = [];
+                db.run('UPDATE rooms SET gameTable = ?, lastActivity = ? WHERE roomId = ?', [JSON.stringify(table), Date.now(), sanitizedRoomId], err => {
+                    if (err) {
+                        console.error('Error updating game table:', err.message);
+                    }
+                });
+                logPlayerAction(sanitizedRoomId, sanitizedPlayerId, 'takeCards');
+                db.all('SELECT playerId, isDisconnected FROM players WHERE roomId = ?', [sanitizedRoomId], (err, players) => {
+                    if (err) {
+                        socket.emit('errorMessage', 'Server error');
+                        console.error('Error fetching players:', err.message);
                         return;
                     }
-                    console.log(`Player ${playerName} took ${table.length} card pairs in room ${roomId}`);
-
-                    table = [];
-                    db.run('UPDATE rooms SET gameTable = ?, lastActivity = ? WHERE roomId = ?', [JSON.stringify(table), Date.now(), roomId], err => {
-                        if (err) {
-                            console.error('Error clearing table:', err.message);
-                            socket.emit('errorMessage', 'Server error.');
-                            return;
-                        }
-
-                        db.all('SELECT playerId, isDisconnected FROM players WHERE roomId = ?', [roomId], (err, players) => {
-                            if (err) {
-                                console.error('Error fetching players:', err.message);
-                                socket.emit('errorMessage', 'Server error.');
-                                return;
+                    const activePlayers = players.filter(p => !p.isDisconnected);
+                    if (activePlayers.length < 2) {
+                        handleSinglePlayerGame(sanitizedRoomId);
+                        return;
+                    }
+                    const playerIds = activePlayers.map(p => p.playerId);
+                    const currentDefenderIndex = playerIds.indexOf(row.currentDefender);
+                    const nextAttackerIndex = (currentDefenderIndex + 1) % playerIds.length;
+                    const nextDefenderIndex = (nextAttackerIndex + 1) % playerIds.length;
+                    const newAttacker = playerIds[nextAttackerIndex];
+                    const newDefender = playerIds[nextDefenderIndex] || playerIds[0];
+                    drawCards(sanitizedRoomId, [newAttacker, newDefender], () => {
+                        db.run(
+                            'UPDATE rooms SET currentAttacker = ?, currentDefender = ?, lastActivity = ? WHERE roomId = ?',
+                            [newAttacker, newDefender, Date.now(), sanitizedRoomId],
+                            err => {
+                                if (err) {
+                                    socket.emit('errorMessage', 'Server error');
+                                    console.error('Error updating turn:', err.message);
+                                }
+                                updateGameState(sanitizedRoomId);
+                                checkGameEnd(sanitizedRoomId);
+                                startTurnTimer(sanitizedRoomId);
+                                console.log(`Player ${sanitizedPlayerName} took cards in room ${sanitizedRoomId}`);
                             }
-                            const activePlayers = players.filter(p => !p.isDisconnected);
-                            if (activePlayers.length < 2) {
-                                handleSinglePlayerGame(roomId);
-                                return;
-                            }
-
-                            const playerIds = activePlayers.map(p => p.playerId);
-                            const currentDefenderIndex = playerIds.indexOf(row.currentDefender);
-                            const nextAttackerIndex = (currentDefenderIndex + 1) % playerIds.length;
-                            const nextDefenderIndex = (nextAttackerIndex + 1) % playerIds.length;
-                            const newAttacker = playerIds[nextAttackerIndex];
-                            const newDefender = playerIds[nextDefenderIndex] || playerIds[0];
-
-                            drawCards(roomId, [newAttacker, newDefender], () => {
-                                db.run(
-                                    'UPDATE rooms SET currentAttacker = ?, currentDefender = ?, lastActivity = ? WHERE roomId = ?',
-                                    [newAttacker, newDefender, Date.now(), roomId],
-                                    err => {
-                                        if (err) {
-                                            console.error('Error updating roles:', err.message);
-                                            socket.emit('errorMessage', 'Server error.');
-                                        }
-                                        console.log(`Turn updated in room ${roomId}: new attacker=${newAttacker}, new defender=${newDefender}`);
-                                        updateGameState(roomId);
-                                        checkGameEnd(roomId);
-                                        startTurnTimer(roomId);
-                                    }
-                                );
-                            });
-                        });
+                        );
                     });
                 });
             });
@@ -1107,101 +1121,75 @@ io.on('connection', (socket) => {
     });
 
     socket.on('changeLanguage', ({ playerId, language }) => {
-        language = sanitizeLanguage(language);
-        playerId = sanitizeInput(playerId);
-        console.log(`Player ${playerId} changing language to ${language}`);
-        db.run(
-            'UPDATE players SET language = ? WHERE playerId = ?',
-            [language, playerId],
-            (err) => {
-                if (err) {
-                    console.error('Error updating language:', err.message);
-                    socket.emit('errorMessage', 'Server error updating language.');
+        const sanitizedPlayerId = sanitizeInput(playerId);
+        const sanitizedLanguage = sanitizeLanguage(language);
+        db.run('UPDATE players SET language = ? WHERE playerId = ?', [sanitizedLanguage, sanitizedPlayerId], (err) => {
+            if (err) {
+                socket.emit('errorMessage', 'Server error');
+                console.error('Error updating language:', err.message);
+                return;
+            }
+            db.get('SELECT roomId, socketIds FROM players WHERE playerId = ?', [sanitizedPlayerId], (err, row) => {
+                if (err || !row) {
+                    socket.emit('errorMessage', 'Player not found');
+                    console.log(`Player ${sanitizedPlayerId} not found for language change`);
                     return;
                 }
-                db.get('SELECT roomId, socketIds FROM players WHERE playerId = ?', [playerId], (err, row) => {
-                    if (err || !row) {
-                        console.error('Error fetching roomId for player:', err ? err.message : 'Player not found');
-                        socket.emit('errorMessage', 'Player not found.');
-                        return;
-                    }
-                    console.log(`Language updated for player ${playerId} to ${language} in room ${row.roomId}`);
-                    const socketIds = row.socketIds ? JSON.parse(row.socketIds) : [];
-                    socketIds.forEach(socketId => {
-                        io.to(socketId).emit('languageChanged', { language });
-                    });
-                    updateRoomState(row.roomId);
-                    updateGameState(row.roomId);
+                const socketIds = row.socketIds ? JSON.parse(row.socketIds) : [];
+                socketIds.forEach(socketId => {
+                    io.to(socketId).emit('languageChanged', { language: sanitizedLanguage });
                 });
-            }
-        );
+                updateRoomState(row.roomId);
+                updateGameState(row.roomId);
+                console.log(`Player ${sanitizedPlayerId} changed language to ${sanitizedLanguage}`);
+            });
+        });
     });
 
     socket.on('ready', ({ roomId, playerId }) => {
-        roomId = sanitizeInput(roomId);
-        playerId = sanitizeInput(playerId);
-        console.log(`Player ready in room ${roomId}, socket: ${socket.id}, playerId: ${playerId}`);
-        db.get('SELECT ready, isDisconnected, socketIds FROM players WHERE roomId = ? AND playerId = ?', [roomId, playerId], (err, row) => {
-            if (err) {
-                console.error('Error checking ready status:', err.message);
-                socket.emit('errorMessage', 'Server error.');
+        const sanitizedRoomId = sanitizeInput(roomId);
+        const sanitizedPlayerId = sanitizeInput(playerId);
+        db.get('SELECT ready, isDisconnected, socketIds FROM players WHERE roomId = ? AND playerId = ?', [sanitizedRoomId, sanitizedPlayerId], (err, row) => {
+            if (err || !row) {
+                socket.emit('errorMessage', 'Player not found');
+                console.log(`Player ${sanitizedPlayerId} not found for ready`);
                 return;
             }
-            if (!row) {
-                console.warn(`Player ${playerId} not found in room ${roomId}`);
-                socket.emit('errorMessage', 'Player not found.');
-                return;
-            }
-            if (row.ready === 1) {
-                console.log(`Player ${playerId} already ready in room ${roomId}, sending status`);
+            if (row.ready) {
                 const socketIds = row.socketIds ? JSON.parse(row.socketIds) : [];
                 socketIds.forEach(socketId => {
-                    io.to(socketId).emit('playerStatus', { playerId, ready: true, isDisconnected: false });
+                    io.to(socketId).emit('playerStatus', { playerId: sanitizedPlayerId, ready: true, isDisconnected: false });
                 });
+                console.log(`Player ${sanitizedPlayerId} already ready in room ${sanitizedRoomId}`);
                 return;
             }
             db.run(
                 'UPDATE players SET isDisconnected = 0, lastDisconnectedAt = NULL, ready = 1 WHERE roomId = ? AND playerId = ?',
-                [roomId, playerId],
+                [sanitizedRoomId, sanitizedPlayerId],
                 function (err) {
                     if (err) {
-                        console.error('Error setting ready status:', err.message);
-                        socket.emit('errorMessage', 'Server error.');
+                        socket.emit('errorMessage', 'Server error');
+                        console.error('Error setting player ready:', err.message);
                         return;
                     }
-                    console.log(`Ready status updated for playerId ${playerId} in room ${roomId}, rows affected: ${this.changes}`);
-                    if (this.changes === 0) {
-                        console.warn(`No rows updated for playerId ${playerId} in room ${roomId}`);
-                        socket.emit('errorMessage', 'Failed to set ready status.');
-                        return;
-                    }
-                    db.get('SELECT socketIds FROM players WHERE playerId = ?', [playerId], (err, row) => {
-                        if (err) {
-                            console.error('Error fetching socketIds:', err.message);
-                            return;
-                        }
-                        const socketIds = row.socketIds ? JSON.parse(row.socketIds) : [];
-                        socketIds.forEach(socketId => {
-                            io.to(socketId).emit('playerStatus', { playerId, ready: true, isDisconnected: false });
-                        });
+                    const socketIds = row.socketIds ? JSON.parse(row.socketIds) : [];
+                    socketIds.forEach(socketId => {
+                        io.to(socketId).emit('playerStatus', { playerId: sanitizedPlayerId, ready: true, isDisconnected: false });
                     });
                     db.get(
                         'SELECT COUNT(*) as total, SUM(ready) as ready FROM players WHERE roomId = ? AND isDisconnected = 0',
-                        [roomId],
+                        [sanitizedRoomId],
                         (err, row) => {
                             if (err) {
-                                console.error('Error checking ready status:', err.message);
+                                console.error('Error checking ready players:', err.message);
                                 return;
                             }
-                            console.log(`Room ${roomId} status: ${row.ready}/${row.total} ready`);
-                            updateRoomState(roomId);
-                            db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId], err => {
-                                if (err) console.error('Error updating lastActivity:', err.message);
-                            });
+                            updateRoomState(sanitizedRoomId);
+                            db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), sanitizedRoomId]);
                             if (row.ready >= 2 && row.ready === row.total) {
-                                console.log(`All players ready in room ${roomId}, starting game`);
-                                startGame(roomId);
+                                startGame(sanitizedRoomId);
                             }
+                            console.log(`Player ${sanitizedPlayerId} marked ready in room ${sanitizedRoomId}`);
                         }
                     );
                 }
@@ -1210,217 +1198,200 @@ io.on('connection', (socket) => {
     });
 
     socket.on('requestPlayerUpdate', (roomId) => {
-        roomId = sanitizeInput(roomId);
-        console.log(`Requested player update for room ${roomId}`);
-        updateRoomState(roomId);
-        db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId], err => {
-            if (err) console.error('Error updating lastActivity:', err.message);
-        });
+        const sanitizedRoomId = sanitizeInput(roomId);
+        updateRoomState(sanitizedRoomId);
+        db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), sanitizedRoomId]);
+        console.log(`Player update requested for room ${sanitizedRoomId}`);
     });
 
     socket.on('leaveRoom', ({ roomId, playerId, playerName }) => {
-        roomId = sanitizeInput(roomId);
-        playerName = sanitizeInput(playerName);
-        playerId = sanitizeInput(playerId);
-        console.log(`Player ${playerName} requested to leave room ${roomId}, playerId: ${playerId}`);
-        removeSocketId(playerId, socket.id, (err) => {
+        const sanitizedRoomId = sanitizeInput(roomId);
+        const sanitizedPlayerName = sanitizeInput(playerName);
+        const sanitizedPlayerId = sanitizeInput(playerId);
+        removeSocketId(sanitizedPlayerId, socket.id, (err) => {
             if (err) {
-                socket.emit('errorMessage', 'Server error leaving room.');
+                socket.emit('errorMessage', 'Server error');
+                console.error('Error removing socketId:', err.message);
                 return;
             }
-            db.get('SELECT socketIds FROM players WHERE roomId = ? AND playerId = ?', [roomId, playerId], (err, row) => {
+            db.get('SELECT socketIds FROM players WHERE roomId = ? AND playerId = ?', [sanitizedRoomId, sanitizedPlayerId], (err, row) => {
                 if (err) {
-                    console.error('Error checking socketIds:', err.message);
-                    socket.emit('errorMessage', 'Server error.');
+                    socket.emit('errorMessage', 'Server error');
+                    console.error('Error fetching socketIds:', err.message);
                     return;
                 }
                 const socketIds = row && row.socketIds ? JSON.parse(row.socketIds) : [];
                 if (socketIds.length === 0) {
-                    db.run('DELETE FROM players WHERE roomId = ? AND playerId = ?', [roomId, playerId], (err) => {
+                    db.run('DELETE FROM players WHERE roomId = ? AND playerId = ?', [sanitizedRoomId, sanitizedPlayerId], (err) => {
                         if (err) {
+                            socket.emit('errorMessage', 'Server error');
                             console.error('Error deleting player:', err.message);
-                            socket.emit('errorMessage', 'Server error leaving room.');
                             return;
                         }
-                        console.log(`Player ${playerName} removed from room ${roomId}`);
-                        socket.leave(roomId);
-                        updateRoomState(roomId);
-                        db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId], err => {
-                            if (err) console.error('Error updating lastActivity:', err.message);
-                        });
+                        socket.leave(sanitizedRoomId);
+                        updateRoomState(sanitizedRoomId);
+                        db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), sanitizedRoomId]);
+                        console.log(`Player ${sanitizedPlayerName} left room ${sanitizedRoomId}`);
                     });
                 } else {
-                    socket.leave(roomId);
-                    updateRoomState(roomId);
+                    socket.leave(sanitizedRoomId);
+                    updateRoomState(sanitizedRoomId);
+                    console.log(`Player ${sanitizedPlayerName} disconnected socket from room ${sanitizedRoomId}`);
                 }
             });
         });
     });
 
     socket.on('leaveGame', ({ roomId, playerId, playerName }) => {
-        roomId = sanitizeInput(roomId);
-        playerName = sanitizeInput(playerName);
-        playerId = sanitizeInput(playerId);
-        console.log(`Player ${playerName} requested to leave game ${roomId}, playerId: ${playerId}`);
-        db.run('UPDATE players SET isDisconnected = 1, lastDisconnectedAt = ? WHERE roomId = ? AND playerId = ?', [Date.now(), roomId, playerId], (err) => {
+        const sanitizedRoomId = sanitizeInput(roomId);
+        const sanitizedPlayerName = sanitizeInput(playerName);
+        const sanitizedPlayerId = sanitizeInput(playerId);
+        db.run('UPDATE players SET isDisconnected = 1, lastDisconnectedAt = ? WHERE roomId = ? AND playerId = ?', [Date.now(), sanitizedRoomId, sanitizedPlayerId], (err) => {
             if (err) {
-                console.error('Error marking player as disconnected:', err.message);
-                socket.emit('errorMessage', 'Server error leaving game.');
+                socket.emit('errorMessage', 'Server error');
+                console.error('Error marking player disconnected:', err.message);
                 return;
             }
-            console.log(`Player ${playerName} marked as disconnected in game ${roomId}`);
-            removeSocketId(playerId, socket.id, (err) => {
-                if (err) console.error('Error removing socketId:', err.message);
-            });
-            socket.leave(roomId);
-            updateGameState(roomId);
-            handleSinglePlayerGame(roomId);
-            db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId], err => {
-                if (err) console.error('Error updating lastActivity:', err.message);
-            });
+            removeSocketId(sanitizedPlayerId, socket.id);
+            socket.leave(sanitizedRoomId);
+            updateGameState(sanitizedRoomId);
+            handleSinglePlayerGame(sanitizedRoomId);
+            db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), sanitizedRoomId]);
+            console.log(`Player ${sanitizedPlayerName} left game in room ${sanitizedRoomId}`);
         });
     });
 
     socket.on('playCard', ({ roomId, playerName, playerId, card, role }) => {
-        roomId = sanitizeInput(roomId);
-        playerName = sanitizeInput(playerName);
-        playerId = sanitizeInput(playerId);
-        console.log(`Player ${playerName} (${role}) played card ${card.rank} of ${card.suit} in room ${roomId}, socket=${socket.id}`);
-        db.get('SELECT trump, gameTable, currentAttacker, currentDefender, gameEnded FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
-            if (err) {
-                console.error('Error fetching room:', err.message);
-                socket.emit('errorMessage', 'Server error.');
-                return;
-            }
-            if (!row) {
-                socket.emit('errorMessage', 'Game room does not exist.');
+        const sanitizedRoomId = sanitizeInput(roomId);
+        const sanitizedPlayerName = sanitizeInput(playerName);
+        const sanitizedPlayerId = sanitizeInput(playerId);
+        db.get('SELECT trump, gameTable, currentAttacker, currentDefender, gameEnded FROM rooms WHERE roomId = ?', [sanitizedRoomId], (err, row) => {
+            if (err || !row) {
+                socket.emit('errorMessage', 'Game room does not exist');
+                console.log(`Room ${sanitizedRoomId} not found for playCard`);
                 return;
             }
             if (row.gameEnded) {
-                console.log(`Room ${roomId} has ended, rejecting playCard action`);
-                socket.emit('errorMessage', 'Game has ended.');
+                socket.emit('errorMessage', 'Game has ended');
+                console.log(`Game in room ${sanitizedRoomId} has ended`);
                 return;
             }
             const trump = row.trump ? JSON.parse(row.trump).suit : null;
             let table = row.gameTable ? JSON.parse(row.gameTable) : [];
-            db.get('SELECT id, isDisconnected, hand, socketIds FROM players WHERE roomId = ? AND playerId = ?', [roomId, playerId], (err, player) => {
+            db.get('SELECT isDisconnected, hand, socketIds FROM players WHERE roomId = ? AND playerId = ?', [sanitizedRoomId, sanitizedPlayerId], (err, player) => {
                 if (err || !player) {
-                    console.error('Error fetching player:', err ? err.message : 'Player not found');
-                    socket.emit('errorMessage', 'Player not found.');
+                    socket.emit('errorMessage', 'Player not found');
+                    console.log(`Player ${sanitizedPlayerId} not found`);
                     return;
                 }
                 if (player.isDisconnected) {
-                    socket.emit('errorMessage', 'Cannot play cards while disconnected.');
+                    socket.emit('errorMessage', 'Cannot play while disconnected');
+                    console.log(`Player ${sanitizedPlayerId} is disconnected`);
                     return;
                 }
-                const isAttacker = playerId === row.currentAttacker;
-                const isDefender = playerId === row.currentDefender;
-
+                const isAttacker = sanitizedPlayerId === row.currentAttacker;
+                const isDefender = sanitizedPlayerId === row.currentDefender;
                 if (role === 'attack' && !isAttacker) {
-                    socket.emit('errorMessage', 'Not your turn to attack.');
+                    socket.emit('errorMessage', 'Not your turn to attack');
+                    console.log(`Player ${sanitizedPlayerId} is not attacker`);
                     return;
                 }
                 if (role === 'defend' && !isDefender) {
-                    socket.emit('errorMessage', 'Not your turn to defend.');
+                    socket.emit('errorMessage', 'Not your turn to defend');
+                    console.log(`Player ${sanitizedPlayerId} is not defender`);
                     return;
                 }
-
                 let hand = player.hand ? JSON.parse(player.hand) : [];
                 const cardIndex = hand.findIndex(c => c.rank === card.rank && c.suit === card.suit);
                 if (cardIndex === -1) {
-                    socket.emit('errorMessage', 'Invalid card.');
+                    socket.emit('errorMessage', 'Invalid card');
+                    console.log(`Invalid card ${JSON.stringify(card)} for player ${sanitizedPlayerId}`);
                     return;
                 }
-
                 if (role === 'attack') {
                     if (!isValidAttackCard(card, table, trump) || table.length >= 12) {
-                        socket.emit('errorMessage', 'Invalid attack card.');
+                        socket.emit('errorMessage', 'Invalid attack card');
+                        console.log(`Invalid attack card ${JSON.stringify(card)}`);
                         return;
                     }
                     table.push({ attack: card, defense: null });
-                } else if (role === 'defend') {
+                } else {
                     const lastAttack = table.find(pair => !pair.defense);
                     if (!lastAttack) {
-                        socket.emit('errorMessage', 'No attack card to defend against.');
+                        socket.emit('errorMessage', 'No attack card to defend');
+                        console.log('No attack card to defend');
                         return;
                     }
                     if (!isValidDefenseCard(card, lastAttack.attack, trump)) {
-                        socket.emit('errorMessage', 'Invalid defense card.');
+                        socket.emit('errorMessage', 'Invalid defense card');
+                        console.log(`Invalid defense card ${JSON.stringify(card)}`);
                         return;
                     }
                     lastAttack.defense = card;
                 }
-
                 hand.splice(cardIndex, 1);
-                db.run('UPDATE players SET hand = ? WHERE playerId = ?', [JSON.stringify(hand), playerId], err => {
+                db.run('UPDATE players SET hand = ? WHERE playerId = ?', [JSON.stringify(hand), sanitizedPlayerId], err => {
                     if (err) {
-                        console.error('Error updating hand:', err.message);
-                        socket.emit('errorMessage', 'Server error.');
-                        return;
+                        console.error('Error updating player hand:', err.message);
                     }
-                    db.run('UPDATE rooms SET gameTable = ?, lastActivity = ? WHERE roomId = ?', [JSON.stringify(table), Date.now(), roomId], err => {
-                        if (err) {
-                            console.error('Error updating table:', err.message);
-                            socket.emit('errorMessage', 'Server error.');
-                        }
-                        updateGameState(roomId);
-                        checkGameEnd(roomId);
-                    });
                 });
+                db.run('UPDATE rooms SET gameTable = ?, lastActivity = ? WHERE roomId = ?', [JSON.stringify(table), Date.now(), sanitizedRoomId], err => {
+                    if (err) {
+                        console.error('Error updating game table:', err.message);
+                    }
+                });
+                logPlayerAction(sanitizedRoomId, sanitizedPlayerId, role, card);
+                updateGameState(sanitizedRoomId);
+                checkGameEnd(sanitizedRoomId);
+                console.log(`Player ${sanitizedPlayerName} played card ${JSON.stringify(card)} as ${role} in room ${sanitizedRoomId}`);
             });
         });
     });
 
     socket.on('endTurn', ({ roomId, playerId, playerName }) => {
-        roomId = sanitizeInput(roomId);
-        playerName = sanitizeInput(playerName);
-        playerId = sanitizeInput(playerId);
-        console.log(`Player ${playerName} ended turn in room ${roomId}`);
-        db.get('SELECT gameTable, currentAttacker, currentDefender, gameEnded FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
-            if (err) {
-                console.error('Error fetching room:', err.message);
-                socket.emit('errorMessage', 'Server error.');
-                return;
-            }
-            if (!row) {
-                socket.emit('errorMessage', 'Game room does not exist.');
+        const sanitizedRoomId = sanitizeInput(roomId);
+        const sanitizedPlayerName = sanitizeInput(playerName);
+        const sanitizedPlayerId = sanitizeInput(playerId);
+        db.get('SELECT gameTable, currentAttacker, currentDefender, gameEnded FROM rooms WHERE roomId = ?', [sanitizedRoomId], (err, row) => {
+            if (err || !row) {
+                socket.emit('errorMessage', 'Game room does not exist');
+                console.log(`Room ${sanitizedRoomId} not found for endTurn`);
                 return;
             }
             if (row.gameEnded) {
-                console.log(`Room ${roomId} has ended, rejecting endTurn action`);
-                socket.emit('errorMessage', 'Game has ended.');
+                socket.emit('errorMessage', 'Game has ended');
+                console.log(`Game in room ${sanitizedRoomId} has ended`);
                 return;
             }
             let table = row.gameTable ? JSON.parse(row.gameTable) : [];
-            db.get('SELECT id, isDisconnected, socketIds FROM players WHERE roomId = ? AND playerId = ?', [roomId, playerId], (err, player) => {
+            db.get('SELECT isDisconnected, socketIds FROM players WHERE roomId = ? AND playerId = ?', [sanitizedRoomId, sanitizedPlayerId], (err, player) => {
                 if (err || !player) {
-                    console.error('Error fetching player:', err ? err.message : 'Player not found');
-                    socket.emit('errorMessage', 'Player not found.');
+                    socket.emit('errorMessage', 'Player not found');
+                    console.log(`Player ${sanitizedPlayerId} not found`);
                     return;
                 }
                 if (player.isDisconnected) {
-                    socket.emit('errorMessage', 'Cannot end turn while disconnected.');
+                    socket.emit('errorMessage', 'Cannot end turn while disconnected');
+                    console.log(`Player ${sanitizedPlayerId} is disconnected`);
                     return;
                 }
-                const isDefender = playerId === row.currentDefender;
-
-                if (!isDefender) {
-                    socket.emit('errorMessage', 'Only defender can end turn.');
+                if (sanitizedPlayerId !== row.currentDefender) {
+                    socket.emit('errorMessage', 'Only defender can end turn');
+                    console.log(`Player ${sanitizedPlayerId} is not defender`);
                     return;
                 }
-
                 const hasUndefended = table.some(pair => !pair.defense);
                 if (hasUndefended) {
-                    db.all('SELECT playerId, name, hand, isDisconnected, socketIds FROM players WHERE roomId = ?', [roomId], (err, players) => {
+                    db.all('SELECT playerId, name, hand, isDisconnected, socketIds FROM players WHERE roomId = ?', [sanitizedRoomId], (err, players) => {
                         if (err) {
+                            socket.emit('errorMessage', 'Server error');
                             console.error('Error fetching players:', err.message);
-                            socket.emit('errorMessage', 'Server error.');
                             return;
                         }
                         const defender = players.find(p => p.playerId === row.currentDefender);
                         if (!defender) {
-                            console.error(`Defender ${row.currentDefender} not found among players`);
-                            socket.emit('errorMessage', 'Defender not found.');
+                            socket.emit('errorMessage', 'Defender not found');
+                            console.log(`Defender not found in room ${sanitizedRoomId}`);
                             return;
                         }
                         let defenderHand = defender.hand ? JSON.parse(defender.hand) : [];
@@ -1429,84 +1400,85 @@ io.on('connection', (socket) => {
                             if (pair.defense) defenderHand.push(pair.defense);
                         });
                         db.run('UPDATE players SET hand = ? WHERE playerId = ?', [JSON.stringify(defenderHand), defender.playerId], err => {
-                            if (err) console.error('Error updating defender hand:', err.message);
-                        });
-                        console.log(`Defender ${defender.name} took cards in room ${roomId}`);
-                        table = [];
-                        db.run('UPDATE rooms SET gameTable = ?, lastActivity = ? WHERE roomId = ?', [JSON.stringify(table), Date.now(), roomId], err => {
                             if (err) {
-                                console.error('Error clearing table:', err.message);
-                                return;
+                                console.error('Error updating defender hand:', err.message);
                             }
-                            const activePlayers = players.filter(p => !p.isDisconnected);
-                            if (activePlayers.length < 2) {
-                                handleSinglePlayerGame(roomId);
-                                return;
+                        });
+                        table = [];
+                        db.run('UPDATE rooms SET gameTable = ?, lastActivity = ? WHERE roomId = ?', [JSON.stringify(table), Date.now(), sanitizedRoomId], err => {
+                            if (err) {
+                                console.error('Error updating game table:', err.message);
                             }
-                            const playerIds = activePlayers.map(p => p.playerId);
-                            const currentIndex = playerIds.indexOf(row.currentAttacker);
-                            const nextAttackerIndex = (currentIndex + 1) % playerIds.length;
-                            const nextDefenderIndex = (nextAttackerIndex + 1) % playerIds.length;
-                            const newAttacker = playerIds[nextAttackerIndex];
-                            const newDefender = playerIds[nextDefenderIndex] || playerIds[0];
-
-                            drawCards(roomId, [newAttacker, newDefender], () => {
-                                db.run(
-                                    'UPDATE rooms SET currentAttacker = ?, currentDefender = ?, lastActivity = ? WHERE roomId = ?',
-                                    [newAttacker, newDefender, Date.now(), roomId],
-                                    err => {
-                                        if (err) {
-                                            console.error('Error updating roles:', err.message);
-                                            return;
-                                        }
-                                        updateGameState(roomId);
-                                        checkGameEnd(roomId);
-                                        startTurnTimer(roomId);
+                        });
+                        logPlayerAction(sanitizedRoomId, sanitizedPlayerId, 'endTurnFailed');
+                        const activePlayers = players.filter(p => !p.isDisconnected);
+                        if (activePlayers.length < 2) {
+                            handleSinglePlayerGame(sanitizedRoomId);
+                            return;
+                        }
+                        const playerIds = activePlayers.map(p => p.playerId);
+                        const currentDefenderIndex = playerIds.indexOf(row.currentDefender);
+                        const nextAttackerIndex = (currentDefenderIndex + 1) % playerIds.length;
+                        const nextDefenderIndex = (nextAttackerIndex + 1) % playerIds.length;
+                        const newAttacker = playerIds[nextAttackerIndex];
+                        const newDefender = playerIds[nextDefenderIndex] || playerIds[0];
+                        drawCards(sanitizedRoomId, [newAttacker, newDefender], () => {
+                            db.run(
+                                'UPDATE rooms SET currentAttacker = ?, currentDefender = ?, lastActivity = ? WHERE roomId = ?',
+                                [newAttacker, newDefender, Date.now(), sanitizedRoomId],
+                                err => {
+                                    if (err) {
+                                        socket.emit('errorMessage', 'Server error');
+                                        console.error('Error updating turn:', err.message);
                                     }
-                                );
-                            });
+                                    updateGameState(sanitizedRoomId);
+                                    checkGameEnd(sanitizedRoomId);
+                                    startTurnTimer(sanitizedRoomId);
+                                    console.log(`Player ${sanitizedPlayerName} ended turn (failed defense) in room ${sanitizedRoomId}`);
+                                }
+                            );
                         });
                     });
                 } else {
-                    console.log(`Defender ${playerName} defended successfully in room ${roomId}`);
                     table = [];
-                    db.run('UPDATE rooms SET gameTable = ?, lastActivity = ? WHERE roomId = ?', [JSON.stringify(table), Date.now(), roomId], err => {
+                    db.run('UPDATE rooms SET gameTable = ?, lastActivity = ? WHERE roomId = ?', [JSON.stringify(table), Date.now(), sanitizedRoomId], err => {
                         if (err) {
-                            console.error('Error clearing table:', err.message);
+                            console.error('Error updating game table:', err.message);
+                        }
+                    });
+                    logPlayerAction(sanitizedRoomId, sanitizedPlayerId, 'endTurnSuccess');
+                    db.all('SELECT playerId, name, isDisconnected FROM players WHERE roomId = ?', [sanitizedRoomId], (err, players) => {
+                        if (err) {
+                            socket.emit('errorMessage', 'Server error');
+                            console.error('Error fetching players:', err.message);
                             return;
                         }
-                        db.all('SELECT playerId, name, isDisconnected FROM players WHERE roomId = ?', [roomId], (err, players) => {
-                            if (err) {
-                                console.error('Error fetching players:', err.message);
-                                return;
-                            }
-                            const activePlayers = players.filter(p => !p.isDisconnected);
-                            if (activePlayers.length < 2) {
-                                handleSinglePlayerGame(roomId);
-                                return;
-                            }
-                            const playerIds = activePlayers.map(p => p.playerId);
-                            const currentIndex = playerIds.indexOf(row.currentAttacker);
-                            const nextAttackerIndex = (currentIndex + 1) % playerIds.length;
-                            const nextDefenderIndex = (nextAttackerIndex + 1) % playerIds.length;
-                            const newAttacker = playerIds[nextAttackerIndex];
-                            const newDefender = playerIds[nextDefenderIndex] || playerIds[0];
-
-                            drawCards(roomId, [newAttacker, newDefender], () => {
-                                db.run(
-                                    'UPDATE rooms SET currentAttacker = ?, currentDefender = ?, lastActivity = ? WHERE roomId = ?',
-                                    [newAttacker, newDefender, Date.now(), roomId],
-                                    err => {
-                                        if (err) {
-                                            console.error('Error updating roles:', err.message);
-                                            return;
-                                        }
-                                        updateGameState(roomId);
-                                        checkGameEnd(roomId);
-                                        startTurnTimer(roomId);
+                        const activePlayers = players.filter(p => !p.isDisconnected);
+                        if (activePlayers.length < 2) {
+                            handleSinglePlayerGame(sanitizedRoomId);
+                            return;
+                        }
+                        const playerIds = activePlayers.map(p => p.playerId);
+                        const currentDefenderIndex = playerIds.indexOf(row.currentDefender);
+                        const nextAttackerIndex = (currentDefenderIndex + 1) % playerIds.length;
+                        const nextDefenderIndex = (nextAttackerIndex + 1) % playerIds.length;
+                        const newAttacker = playerIds[nextAttackerIndex];
+                        const newDefender = playerIds[nextDefenderIndex] || playerIds[0];
+                        drawCards(sanitizedRoomId, [newAttacker, newDefender], () => {
+                            db.run(
+                                'UPDATE rooms SET currentAttacker = ?, currentDefender = ?, lastActivity = ? WHERE roomId = ?',
+                                [newAttacker, newDefender, Date.now(), sanitizedRoomId],
+                                err => {
+                                    if (err) {
+                                        socket.emit('errorMessage', 'Server error');
+                                        console.error('Error updating turn:', err.message);
                                     }
-                                );
-                            });
+                                    updateGameState(sanitizedRoomId);
+                                    checkGameEnd(sanitizedRoomId);
+                                    startTurnTimer(sanitizedRoomId);
+                                    console.log(`Player ${sanitizedPlayerName} ended turn (successful defense) in room ${sanitizedRoomId}`);
+                                }
+                            );
                         });
                     });
                 }
@@ -1515,86 +1487,75 @@ io.on('connection', (socket) => {
     });
 
     socket.on('chatMessage', ({ roomId, playerName, message }) => {
-        roomId = sanitizeInput(roomId);
-        playerName = sanitizeInput(playerName);
-        message = sanitizeInput(message ? message.trim().slice(0, 200) : '');
-        console.log(`Chat message in room ${roomId} from ${playerName}: ${message}`);
-        io.to(roomId).emit('chatMessage', { playerName, message });
+        const sanitizedRoomId = sanitizeInput(roomId);
+        const sanitizedPlayerName = sanitizeInput(playerName);
+        const sanitizedMessage = sanitizeInput(message ? message.trim().slice(0, 200) : '');
+        io.to(sanitizedRoomId).emit('chatMessage', { playerName: sanitizedPlayerName, message: sanitizedMessage });
+        console.log(`Chat message from ${sanitizedPlayerName} in room ${sanitizedRoomId}: ${sanitizedMessage}`);
     });
 
     socket.on('tempDisconnect', ({ roomId, playerId, playerName }) => {
-        roomId = sanitizeInput(roomId);
-        playerName = sanitizeInput(playerName);
-        playerId = sanitizeInput(playerId);
-        console.log(`Temporary disconnect: player=${playerName}, playerId=${playerId}, room=${roomId}, socket=${socket.id}`);
+        const sanitizedRoomId = sanitizeInput(roomId);
+        const sanitizedPlayerName = sanitizeInput(playerName);
+        const sanitizedPlayerId = sanitizeInput(playerId);
         db.run(
             'UPDATE players SET isDisconnected = 1, lastDisconnectedAt = ? WHERE roomId = ? AND playerId = ?',
-            [Date.now(), roomId, playerId],
+            [Date.now(), sanitizedRoomId, sanitizedPlayerId],
             err => {
                 if (err) {
                     console.error('Error marking player as temporarily disconnected:', err.message);
                     return;
                 }
-                console.log(`Player ${playerName} marked as temporarily disconnected in room ${roomId}`);
-                removeSocketId(playerId, socket.id, (err) => {
-                    if (err) console.error('Error removing socketId:', err.message);
-                });
-                updateGameState(roomId);
-                handleSinglePlayerGame(roomId);
+                removeSocketId(sanitizedPlayerId, socket.id);
+                updateGameState(sanitizedRoomId);
+                handleSinglePlayerGame(sanitizedRoomId);
+                console.log(`Player ${sanitizedPlayerName} temporarily disconnected from room ${sanitizedRoomId}`);
             }
         );
     });
 
     socket.on('reconnectPlayer', ({ roomId, playerId, playerName }) => {
-        roomId = sanitizeInput(roomId);
-        playerName = sanitizeInput(playerName);
-        playerId = sanitizeInput(playerId);
-        console.log(`Reconnect request: player=${playerName}, playerId=${playerId}, room=${roomId}, socket=${socket.id}`);
-        db.get('SELECT isDisconnected, language, ready, socketIds, name FROM players WHERE roomId = ? AND playerId = ?', [roomId, playerId], (err, row) => {
-            if (err) {
-                console.error('Error checking player for reconnect:', err.message);
-                socket.emit('errorMessage', 'Server error.');
+        const sanitizedRoomId = sanitizeInput(roomId);
+        const sanitizedPlayerName = sanitizeInput(playerName);
+        const sanitizedPlayerId = sanitizeInput(playerId);
+        db.get('SELECT isDisconnected, language, ready, socketIds, name FROM players WHERE roomId = ? AND playerId = ?', [sanitizedRoomId, sanitizedPlayerId], (err, row) => {
+            if (err || !row) {
+                socket.emit('errorMessage', 'Player not found');
+                console.log(`Player ${sanitizedPlayerId} not found for reconnect`);
                 return;
             }
-            if (!row) {
-                console.warn(`Player ${playerName} not found in room ${roomId} for reconnect`);
-                socket.emit('errorMessage', 'Player not found.');
-                return;
-            }
-            if (row.name !== playerName) {
-                socket.emit('errorMessage', 'Player name mismatch.');
+            if (row.name !== sanitizedPlayerName) {
+                socket.emit('errorMessage', 'Name mismatch');
+                console.log(`Name mismatch for reconnect: ${row.name} vs ${sanitizedPlayerName}`);
                 return;
             }
             db.run(
                 'UPDATE players SET isDisconnected = 0, lastDisconnectedAt = NULL WHERE roomId = ? AND playerId = ?',
-                [roomId, playerId],
+                [sanitizedRoomId, sanitizedPlayerId],
                 err => {
                     if (err) {
+                        socket.emit('errorMessage', 'Server error');
                         console.error('Error reconnecting player:', err.message);
-                        socket.emit('errorMessage', 'Server error.');
                         return;
                     }
-                    addSocketId(playerId, socket.id, (err) => {
+                    addSocketId(sanitizedPlayerId, socket.id, (err) => {
                         if (err) {
-                            socket.emit('errorMessage', 'Server error adding socket.');
+                            socket.emit('errorMessage', 'Server error');
+                            console.error('Error adding socketId for reconnect:', err.message);
                             return;
                         }
-                        console.log(`Player ${playerName} reconnected to room ${roomId}, playerId: ${playerId}, socket: ${socket.id}`);
-                        socket.join(roomId);
-                        socket.emit('roomJoined', { roomId, playerId, language: row.language, playerName });
-                        socket.emit('playerStatus', { playerId, ready: !!row.ready, isDisconnected: false });
-                        io.to(roomId).emit('playerReconnected', { playerName });
-                        updateRoomState(roomId);
-                        db.get('SELECT trump FROM rooms WHERE roomId = ?', [roomId], (err, room) => {
-                            if (err) {
-                                console.error('Error checking game state:', err.message);
-                                return;
-                            }
+                        socket.join(sanitizedRoomId);
+                        socket.emit('roomJoined', { roomId: sanitizedRoomId, playerId: sanitizedPlayerId, language: row.language, playerName: sanitizedPlayerName });
+                        socket.emit('playerStatus', { playerId: sanitizedPlayerId, ready: !!row.ready, isDisconnected: false });
+                        io.to(sanitizedRoomId).emit('playerReconnected', { playerName: sanitizedPlayerName });
+                        updateRoomState(sanitizedRoomId);
+                        db.get('SELECT trump FROM rooms WHERE roomId = ?', [sanitizedRoomId], (err, room) => {
                             if (room && room.trump) {
-                                updateGameState(roomId);
-                                handleSinglePlayerGame(roomId);
+                                updateGameState(sanitizedRoomId);
+                                handleSinglePlayerGame(sanitizedRoomId);
                             }
                         });
+                        console.log(`Player ${sanitizedPlayerName} reconnected to room ${sanitizedRoomId}`);
                     });
                 }
             );
@@ -1602,23 +1563,20 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', () => {
-        console.log(`User disconnected: socket=${socket.id}`);
         db.get('SELECT roomId, playerId, name FROM players WHERE id = ?', [socket.id], (err, player) => {
-            if (err) {
-                console.error('Error checking player on disconnect:', err.message);
+            if (err || !player) {
+                console.log(`No player found for disconnected socket ${socket.id}`);
                 return;
             }
-            if (!player) return;
             const { roomId, playerId, name } = player;
-            console.log(`Player ${name} disconnected from room ${roomId}, playerId: ${playerId}, socket=${socket.id}`);
             removeSocketId(playerId, socket.id, (err) => {
                 if (err) {
-                    console.error('Error removing socketId:', err.message);
+                    console.error('Error removing socketId on disconnect:', err.message);
                     return;
                 }
                 db.get('SELECT socketIds FROM players WHERE roomId = ? AND playerId = ?', [roomId, playerId], (err, row) => {
                     if (err) {
-                        console.error('Error checking socketIds:', err.message);
+                        console.error('Error fetching socketIds on disconnect:', err.message);
                         return;
                     }
                     const socketIds = row && row.socketIds ? JSON.parse(row.socketIds) : [];
@@ -1634,7 +1592,7 @@ io.on('connection', (socket) => {
                                 console.log(`Player ${name} marked as disconnected in room ${roomId}`);
                                 db.get('SELECT trump FROM rooms WHERE roomId = ?', [roomId], (err, row) => {
                                     if (err) {
-                                        console.error('Error checking game state:', err.message);
+                                        console.error('Error checking game state on disconnect:', err?.message);
                                         return;
                                     }
                                     if (row && row.trump) {
@@ -1643,14 +1601,10 @@ io.on('connection', (socket) => {
                                     } else {
                                         updateRoomState(roomId);
                                     }
-                                });
-                                db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId], err => {
-                                    if (err) console.error('Error updating lastActivity:', err.message);
+                                    db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId]);
                                 });
                             }
                         );
-                    } else {
-                        updateRoomState(roomId);
                     }
                 });
             });
@@ -1658,36 +1612,8 @@ io.on('connection', (socket) => {
     });
 });
 
-// Periodic database cleanup
-function cleanOldRooms() {
-    const oneHourAgo = Date.now() - 3600000;
-    db.all('SELECT roomId FROM rooms WHERE lastActivity < ?', [oneHourAgo], (err, rooms) => {
-        if (err) {
-            console.error('Error fetching old rooms:', err.message);
-            return;
-        }
-        rooms.forEach(room => {
-            db.get('SELECT COUNT(*) as count FROM players WHERE roomId = ?', [room.roomId], (err, row) => {
-                if (err) {
-                    console.error('Error counting players for cleanup:', err.message);
-                    return;
-                }
-                if (row.count === 0) {
-                    db.run('DELETE FROM rooms WHERE roomId = ?', [room.roomId], err => {
-                        if (err) {
-                            console.error('Error deleting old room:', err.message);
-                        } else {
-                            console.log(`Deleted old room ${room.roomId} with no players`);
-                        }
-                    });
-                }
-            });
-        });
-    });
-}
-setInterval(cleanOldRooms, 600000); // Run cleanup every 10 minutes
-
-// Start server
+// Запуск сервера
 server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`Server is running on port ${PORT}`);
+    console.log(`Application URL: ${APP_URL}`);
 });
