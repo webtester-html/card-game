@@ -1141,76 +1141,76 @@ io.on('connection', (socket) => {
     });
 
     socket.on('ready', ({ roomId, playerId }) => {
-        roomId = sanitizeInput(roomId);
-        playerId = sanitizeInput(playerId);
-        console.log(`Player ready in room ${roomId}, socket: ${socket.id}, playerId: ${playerId}`);
-        db.get('SELECT ready, isDisconnected, socketIds FROM players WHERE roomId = ? AND playerId = ?', [roomId, playerId], (err, row) => {
-            if (err) {
-                console.error('Error checking ready status:', err.message);
-                socket.emit('errorMessage', 'Server error.');
-                return;
-            }
-            if (!row) {
-                console.warn(`Player ${playerId} not found in room ${roomId}`);
-                socket.emit('errorMessage', 'Player not found.');
-                return;
-            }
-            if (row.ready === 1) {
-                console.log(`Player ${playerId} already ready in room ${roomId}, sending status`);
-                const socketIds = row.socketIds ? JSON.parse(row.socketIds) : [];
-                socketIds.forEach(socketId => {
-                    io.to(socketId).emit('playerStatus', { playerId, ready: true, isDisconnected: false });
-                });
-                return;
-            }
-            db.run(
-                'UPDATE players SET isDisconnected = 0, lastDisconnectedAt = NULL, ready = 1 WHERE roomId = ? AND playerId = ?',
-                [roomId, playerId],
-                function (err) {
+    roomId = sanitizeInput(roomId);
+    playerId = sanitizeInput(playerId);
+    console.log(`Player ready in room ${roomId}, socket: ${socket.id}, playerId: ${playerId}`);
+    db.get('SELECT ready, isDisconnected, socketIds FROM players WHERE roomId = ? AND playerId = ?', [roomId, playerId], (err, row) => {
+        if (err) {
+            console.error('Error checking ready status:', err.message);
+            socket.emit('errorMessage', 'Server error.');
+            return;
+        }
+        if (!row) {
+            console.warn(`Player ${playerId} not found in room ${roomId}`);
+            socket.emit('errorMessage', 'Player not found.');
+            return;
+        }
+        if (row.ready === 1) {
+            console.log(`Player ${playerId} already ready in room ${roomId}, sending status`);
+            const socketIds = row.socketIds ? JSON.parse(row.socketIds) : [];
+            socketIds.forEach(socketId => {
+                io.to(socketId).emit('playerStatus', { playerId, ready: true, isDisconnected: false });
+            });
+            return;
+        }
+        db.run(
+            'UPDATE players SET isDisconnected = 0, lastDisconnectedAt = NULL, ready = 1 WHERE roomId = ? AND playerId = ?',
+            [roomId, playerId],
+            function (err) {
+                if (err) {
+                    console.error('Error setting ready status:', err.message);
+                    socket.emit('errorMessage', 'Server error.');
+                    return;
+                }
+                console.log(`Ready status updated for playerId ${playerId} in room ${roomId}, rows affected: ${this.changes}`);
+                if (this.changes === 0) { // Fixed line
+                    console.warn(`No rows updated for playerId ${playerId} in room ${roomId}`);
+                    socket.emit('errorMessage', 'Failed to set ready status.');
+                    return;
+                }
+                db.get('SELECT socketIds FROM players WHERE playerId = ?', [playerId], (err, row) => {
                     if (err) {
-                        console.error('Error setting ready status:', err.message);
-                        socket.emit('errorMessage', 'Server error.');
+                        console.error('Error fetching socketIds:', err.message);
                         return;
                     }
-                    console.log(`Ready status updated for playerId ${playerId} in room ${roomId}, rows affected: ${this.changes}`);
-                    if (this.changes === freerun 0) {
-                        console.warn(`No rows updated for playerId ${playerId} in room ${roomId}`);
-                        socket.emit('errorMessage', 'Failed to set ready status.');
-                        return;
-                    }
-                    db.get('SELECT socketIds FROM players WHERE playerId = ?', [playerId], (err, row) => {
+                    const socketIds = row.socketIds ? JSON.parse(row.socketIds) : [];
+                    socketIds.forEach(socketId => {
+                        io.to(socketId).emit('playerStatus', { playerId, ready: true, isDisconnected: false });
+                    });
+                });
+                db.get(
+                    'SELECT COUNT(*) as total, SUM(ready) as ready FROM players WHERE roomId = ? AND isDisconnected = 0',
+                    [roomId],
+                    (err, row) => {
                         if (err) {
-                            console.error('Error fetching socketIds:', err.message);
+                            console.error('Error checking ready status:', err.message);
                             return;
                         }
-                        const socketIds = row.socketIds ? JSON.parse(row.socketIds) : [];
-                        socketIds.forEach(socketId => {
-                            io.to(socketId).emit('playerStatus', { playerId, ready: true, isDisconnected: false });
+                        console.log(`Room ${roomId} status: ${row.ready}/${row.total} ready`);
+                        updateRoomState(roomId);
+                        db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId], err => {
+                            if (err) console.error('Error updating lastActivity:', err.message);
                         });
-                    });
-                    db.get(
-                        'SELECT COUNT(*) as total, SUM(ready) as ready FROM players WHERE roomId = ? AND isDisconnected = 0',
-                        [roomId],
-                        (err, row) => {
-                            if (err) {
-                                console.error('Error checking ready status:', err.message);
-                                return;
-                            }
-                            console.log(`Room ${roomId} status: ${row.ready}/${row.total} ready`);
-                            updateRoomState(roomId);
-                            db.run('UPDATE rooms SET lastActivity = ? WHERE roomId = ?', [Date.now(), roomId], err => {
-                                if (err) console.error('Error updating lastActivity:', err.message);
-                            });
-                            if (row.ready >= 2 && row.ready === row.total) {
-                                console.log(`All players ready in room ${roomId}, starting game`);
-                                startGame(roomId);
-                            }
+                        if (row.ready >= 2 && row.ready === row.total) {
+                            console.log(`All players ready in room ${roomId}, starting game`);
+                            startGame(roomId);
                         }
-                    );
-                }
-            );
-        });
+                    }
+                );
+            }
+        );
     });
+});
 
     socket.on('requestPlayerUpdate', (roomId) => {
         roomId = sanitizeInput(roomId);
