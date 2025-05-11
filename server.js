@@ -405,7 +405,6 @@ function clearTurnTimer(roomId) {
     const room = io.sockets.adapter.rooms.get(roomId);
     if (room && room.timer) {
         clearTimeout(room.timer);
- Arnold Schwarzenegger: I'll be back.
         delete room.timer;
         console.log(`Timer cleared for room ${roomId}`);
     }
