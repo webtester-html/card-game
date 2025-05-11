@@ -282,17 +282,65 @@ app.get('/style.css', (req, res) => {
     });
 });
 
-// Routes
+// Маршрут для корневого пути
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
+    const filePath = path.join(__dirname, 'public', 'index.html');
+    if (!fs.existsSync(filePath)) {
+        console.error(`File not found: ${filePath}`);
+        return res.status(404).send('index.html not found');
+    }
+    res.sendFile(filePath, err => {
+        if (err) {
+            console.error('Error serving index.html:', err.message);
+            res.status(500).send('Server error');
+        }
+    });
 });
 
+// Маршрут для комнаты
 app.get('/room', (req, res) => {
-    res.sendFile(path.join(__dirname, 'room.html'));
+    const filePath = path.join(__dirname, 'public', 'room.html');
+    if (!fs.existsSync(filePath)) {
+        console.error(`File not found: ${filePath}`);
+        return res.status(404).send('room.html not found');
+    }
+    res.sendFile(filePath, err => {
+        if (err) {
+            console.error('Error serving room.html:', err.message);
+            res.status(500).send('Server error');
+        }
+    });
 });
 
+// Маршрут для игры
 app.get('/game', (req, res) => {
-    res.sendFile(path.join(__dirname, 'game.html'));
+    const filePath = path.join(__dirname, 'public', 'game.html');
+    if (!fs.existsSync(filePath)) {
+        console.error(`File not found: ${filePath}`);
+        return res.status(404).send('game.html not found');
+    }
+    res.sendFile(filePath, err => {
+        if (err) {
+            console.error('Error serving game.html:', err.message);
+            res.status(500).send('Server error');
+        }
+    });
+});
+
+// Маршрут для style.css
+app.get('/style.css', (req, res) => {
+    const filePath = path.join(__dirname, 'public', 'style.css');
+    res.setHeader('Content-Type', 'text/css');
+    if (!fs.existsSync(filePath)) {
+        console.error(`File not found: ${filePath}`);
+        return res.status(404).send('style.css not found');
+    }
+    res.sendFile(filePath, (err) => {
+        if (err) {
+            console.error('Error serving style.css:', err.message);
+            res.status(404).send('CSS file not found');
+        }
+    });
 });
 
 // Endpoint to fetch room state
