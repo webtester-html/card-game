@@ -27,15 +27,22 @@
             align-items: center;
             padding: 20px;
             box-sizing: border-box;
-            pointer-events: none;
+        }
+        .language-selector {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+        .language-selector select {
+            padding: 5px;
+            font-size: 14px;
+            border-radius: 4px;
         }
         .player-area {
             width: 100%;
             text-align: center;
             position: absolute;
             bottom: 20px;
-            z-index: 100;
-            pointer-events: auto;
         }
         .opponents-container {
             width: 100%;
@@ -45,21 +52,12 @@
             position: absolute;
             top: 20px;
             gap: 20px;
-            z-index: 20;
-            pointer-events: none;
         }
         .opponent-area {
             text-align: center;
             flex: 1;
             min-width: 150px;
             max-width: 250px;
-            pointer-events: none;
-        }
-        .opponent-area .hand {
-            display: grid;
-            grid-template-columns: repeat(6, 1fr);
-            gap: 8px;
-            justify-items: center;
         }
         .player-area h2,
         .opponent-area h2 {
@@ -83,8 +81,6 @@
             background: rgba(0, 0, 0, 0.7);
             padding: 5px;
             border-radius: 4px;
-            z-index: 200;
-            pointer-events: none;
         }
         .deck-area {
             position: absolute;
@@ -94,8 +90,6 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            z-index: 10;
-            pointer-events: none;
         }
         .deck {
             position: relative;
@@ -119,17 +113,11 @@
         .table-area {
             flex-grow: 1;
             width: 100%;
-            display: grid;
-            grid-template-columns: repeat(6, 1fr);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
             gap: 20px;
-            justify-items: center;
-            align-content: center;
-            padding: 20px;
-            margin-left: 150px;
-            box-sizing: border-box;
-            position: relative;
-            z-index: 25;
-            pointer-events: none;
         }
         .card-pair {
             display: flex;
@@ -142,10 +130,6 @@
             justify-content: center;
             gap: 10px;
             flex-wrap: wrap;
-            pointer-events: auto;
-        }
-        .opponent-area .hand {
-            pointer-events: none;
         }
         .opponent-area .hand .card {
             transform: scale(0.7);
@@ -164,13 +148,8 @@
             box-sizing: border-box;
             position: relative;
             cursor: pointer;
-            transition: transform 0.2s, border 0.2s;
+            transition: transform 0.2s;
             color: red;
-            pointer-events: auto;
-            z-index: 101;
-        }
-        .card.clickable {
-            border: 2px solid green;
         }
         .card:hover:not(.disabled) {
             transform: translateY(-5px);
@@ -178,12 +157,6 @@
         .card.disabled {
             opacity: 0.5;
             cursor: not-allowed;
-            border: 1px solid #000;
-        }
-        .card.pending {
-            opacity: 0.7;
-            border: 2px dashed #ffd700;
-            transform: scale(1.05);
         }
         .card-back {
             background: repeating-linear-gradient(45deg, #b71c1c, #b71c1c 10px, #d32f2f 10px, #d32f2f 20px);
@@ -226,7 +199,6 @@
             cursor: pointer;
             margin: 10px;
             display: none;
-            pointer-events: auto;
         }
         #endTurnBtn:hover:not(:disabled),
         #takeCardsBtn:hover:not(:disabled) {
@@ -243,14 +215,43 @@
             text-align: center;
             text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.5);
         }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+        .modal-content h2 {
+            margin: 0 0 20px;
+            color: #d32f2f;
+        }
+        .modal-content button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .modal-content button:hover {
+            background-color: #45a049;
+        }
         @media (max-width: 768px) {
-            .table-area {
-                grid-template-columns: repeat(4, 1fr);
-                margin-left: 120px;
-            }
-            .opponent-area .hand {
-                grid-template-columns: repeat(4, 1fr);
-            }
             .card {
                 width: 80px;
                 height: 112px;
@@ -260,11 +261,83 @@
                 width: 96px;
                 height: 134.4px;
             }
+            .card .rank {
+                font-size: 14px;
+            }
+            .card .suit {
+                font-size: 20px;
+            }
+            .defense-card {
+                margin-top: -80px;
+                margin-left: 48px;
+            }
+            .opponent-area .hand .card {
+                transform: scale(0.6);
+            }
+            .deck-area {
+                left: 10px;
+            }
+            #endTurnBtn,
+            #takeCardsBtn {
+                padding: 8px 16px;
+                font-size: 14px;
+            }
+            .opponents-container {
+                flex-direction: column;
+                align-items: center;
+            }
+            .opponent-area {
+                min-width: 100px;
+                max-width: 200px;
+            }
+        }
+        @media (max-width: 480px) {
+            .card {
+                width: 60px;
+                height: 84px;
+                padding: 4px;
+            }
+            .trump-card .card {
+                width: 72px;
+                height: 100.8px;
+            }
+            .card .rank {
+                font-size: 12px;
+            }
+            .card .suit {
+                font-size: 16px;
+            }
+            .defense-card {
+                margin-top: -60px;
+                margin-left: 36px;
+            }
+            .opponent-area .hand .card {
+                transform: scale(0.5);
+            }
+            .game-container {
+                padding: 10px;
+            }
+            .player-area h2,
+            .opponent-area h2 {
+                font-size: 1em;
+            }
+            #endTurnBtn,
+            #takeCardsBtn {
+                padding: 6px 12px;
+                font-size: 12px;
+            }
         }
     </style>
 </head>
 <body>
     <div class="game-container">
+        <div class="language-selector">
+            <select id="languageSelect">
+                <option value="en">English</option>
+                <option value="uk">Українська</option>
+                <option value="ru">Русский</option>
+            </select>
+        </div>
         <div class="debug-info" id="debugInfo"></div>
         <div class="opponents-container" id="opponentsContainer"></div>
         <div class="table-area" id="table"></div>
@@ -276,16 +349,115 @@
         <div class="player-area">
             <h2 id="playerName"></h2>
             <div class="hand" id="playerHand"></div>
-            <button id="endTurnBtn">End Turn</button>
-            <button id="takeCardsBtn">Take Cards</button>
+            <button id="endTurnBtn"></button>
+            <button id="takeCardsBtn"></button>
             <div id="errorMessage"></div>
+        </div>
+        <div class="modal" id="gameOverModal">
+            <div class="modal-content">
+                <h2 id="gameOverMessage"></h2>
+                <button id="returnToLobby"></button>
+            </div>
         </div>
     </div>
     <script src="/socket.io/socket.io.js"></script>
     <script>
+        const translations = {
+            en: {
+                title: 'Card Game',
+                error_invalid_data: 'Invalid game data. Please rejoin the room.',
+                error_no_room: 'No room specified. Redirecting to lobby...',
+                error_no_player: 'No player name found. Please rejoin the room.',
+                error_session_taken: 'This player is already connected from another session. Please start a new session.',
+                end_turn: 'End Turn',
+                take_cards: 'Take Cards',
+                return_to_lobby: 'Return to Lobby',
+                you_win: 'You Win!',
+                you_lose: 'You Lose!',
+                waiting_reconnect: 'Waiting for players to reconnect...',
+                trump_card_error: 'Trump card not set properly.',
+                server_error: 'Failed to connect to server. Retrying...',
+                invalid_move: 'Invalid move! Please select a valid card.',
+                not_your_turn: 'Not your turn! Please wait.',
+                you_are_attacker: 'You - Attacker',
+                you_are_defender: 'You - Defender',
+                opponent_waiting: 'Waiting for opponent...',
+                opponent_attacker: 'Attacker',
+                opponent_defender: 'Defender',
+                deck_label: 'Deck',
+                game_not_found: 'Game not found. Redirecting to lobby...',
+                fetch_error: 'Failed to fetch game state.',
+                taking_cards: 'Taking cards...',
+                timeout_error: 'Action timed out. Retrying...'
+            },
+            uk: {
+                title: 'Карткова гра',
+                error_invalid_data: 'Недійсні дані гри. Будь ласка, перезайдіть у кімнату.',
+                error_no_room: 'Кімнату не вказано. Перенаправлення до лобі...',
+                error_no_player: 'Ім’я гравця не знайдено. Будь ласка, перезайдіть у кімнату.',
+                error_session_taken: 'Цей гравець уже підключений з іншої сесії. Будь ласка, почніть нову сесію.',
+                end_turn: 'Завершити хід',
+                take_cards: 'Взяти карти',
+                return_to_lobby: 'Повернутися до лобі',
+                you_win: 'Ви перемогли!',
+                you_lose: 'Ви програли!',
+                waiting_reconnect: 'Очікування повторного підключення гравців...',
+                trump_card_error: 'Козирну карту не встановлено належним чином.',
+                server_error: 'Не вдалося підключитися до сервера. Повторна спроба...',
+                invalid_move: 'Недійсний хід! Виберіть правильну карту.',
+                not_your_turn: 'Не ваш хід! Зачекайте.',
+                you_are_attacker: 'Ви - Атакуючий',
+                you_are_defender: 'Ви - Захисник',
+                opponent_waiting: 'Очікування суперника...',
+                opponent_attacker: 'Атакуючий',
+                opponent_defender: 'Захисник',
+                deck_label: 'Колода',
+                game_not_found: 'Гру не знайдено. Перенаправлення до лобі...',
+                fetch_error: 'Не вдалося отримати стан гри.',
+                taking_cards: 'Беремо карти...',
+                timeout_error: 'Час дії минув. Спробуємо ще раз...'
+            },
+            ru: {
+                title: 'Карточная игра',
+                error_invalid_data: 'Недействительные данные игры. Пожалуйста, перезайдите в комнату.',
+                error_no_room: 'Комната не указана. Перенаправление в лобби...',
+                error_no_player: 'Имя игрока не найдено. Пожалуйста, перезайдите в комнату.',
+                error_session_taken: 'Этот игрок уже подключен с другой сессии. Пожалуйста, начните новую сессию.',
+                end_turn: 'Завершить ход',
+                take_cards: 'Взять карты',
+                return_to_lobby: 'Вернуться в лобби',
+                you_win: 'Вы победили!',
+                you_lose: 'Вы проиграли!',
+                waiting_reconnect: 'Ожидание повторного подключения игроков...',
+                trump_card_error: 'Козырная карта не установлена корректно.',
+                server_error: 'Не удалось подключиться к серверу. Повторная попытка...',
+                invalid_move: 'Недействительный ход! Выберите правильную карту.',
+                not_your_turn: 'Не ваш ход! Подождите.',
+                you_are_attacker: 'Вы - Атакующий',
+                you_are_defender: 'Вы - Защитник',
+                opponent_waiting: 'Ожидание соперника...',
+                opponent_attacker: 'Атакующий',
+                opponent_defender: 'Защитник',
+                deck_label: 'Колода',
+                game_not_found: 'Игра не найдена. Перенаправление в лобби...',
+                fetch_error: 'Не удалось получить состояние игры.',
+                taking_cards: 'Берем карты...',
+                timeout_error: 'Время действия истекло. Пробуем снова...'
+            }
+        };
+
+        function t(key) {
+            const lang = localStorage.getItem('language') || 'en';
+            return translations[lang][key] || translations.en[key] || key;
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
             console.log('game.html: Script started');
-            const socket = io();
+            const socket = io({
+                reconnection: true,
+                reconnectionAttempts: 15,
+                reconnectionDelay: 1000
+            });
             const playerNameEl = document.getElementById('playerName');
             const opponentsContainer = document.getElementById('opponentsContainer');
             const playerHandEl = document.getElementById('playerHand');
@@ -296,27 +468,57 @@
             const endTurnBtn = document.getElementById('endTurnBtn');
             const takeCardsBtn = document.getElementById('takeCardsBtn');
             const errorMessageEl = document.getElementById('errorMessage');
+            const gameOverModal = document.getElementById('gameOverModal');
+            const gameOverMessage = document.getElementById('gameOverMessage');
+            const returnToLobby = document.getElementById('returnToLobby');
+            const languageSelect = document.getElementById('languageSelect');
             const debugInfoEl = document.getElementById('debugInfo');
-            let roomId = '';
-            let playerId = '';
-            let playerName = '';
-            let pendingAttackCard = null;
-            let pendingDefenseCard = null;
             let isTakingCards = false;
+            let takeCardsTimeout = null;
+            let takeCardsAttempts = 0;
+            const maxTakeCardsAttempts = 3;
 
-            // Initialize from localStorage
-            roomId = localStorage.getItem('roomId') || new URLSearchParams(window.location.search).get('room') || '';
-            playerId = localStorage.getItem('playerId') || '';
-            playerName = localStorage.getItem('playerName') || '';
+            // Initialize language
+            languageSelect.value = localStorage.getItem('language') || 'en';
+            languageSelect.addEventListener('change', () => {
+                localStorage.setItem('language', languageSelect.value);
+                updateUIText();
+                socket.emit('changeLanguage', { playerId: playerId, language: languageSelect.value });
+            });
 
-            console.log('game.html: Initial data:', { roomId, playerId, playerName });
+            function updateUIText() {
+                endTurnBtn.textContent = t('end_turn');
+                takeCardsBtn.textContent = isTakingCards ? t('taking_cards') : t('take_cards');
+                returnToLobby.textContent = t('return_to_lobby');
+                const deckCount = deckCountEl.textContent.replace(/[^0-9]/g, '') || 0;
+                deckCountEl.textContent = `${t('deck_label')}: ${deckCount}`;
+            }
+            updateUIText();
 
-            if (!roomId || !playerId || !playerName) {
-                console.error('game.html: Missing roomId, playerId, or playerName');
-                errorMessageEl.textContent = 'Missing room or player information';
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomId = urlParams.get('room');
+            let playerName = localStorage.getItem('playerName');
+
+            console.log('game.html: Initial data:', { roomId, playerName });
+
+            if (!roomId) {
+                console.error('game.html: No roomId provided');
+                errorMessageEl.textContent = t('error_no_room');
                 setTimeout(() => window.location.href = '/', 2000);
                 return;
             }
+            if (!playerName) {
+                console.error('game.html: No playerName found in localStorage');
+                errorMessageEl.textContent = t('error_no_player');
+                setTimeout(() => window.location.href = '/', 2000);
+                return;
+            }
+
+            localStorage.setItem('roomId', roomId);
+            let playerId = localStorage.getItem('playerId');
+
+            let joinAttemptCount = 0;
+            const maxJoinAttempts = 10;
 
             const suitSymbols = {
                 Hearts: '♥',
@@ -326,30 +528,29 @@
             };
 
             const rankDisplay = {
-                '6': '6', '7': '7', '8': '8', '9': '9', '10': '10',
-                'Jack': 'J', 'Queen': 'Q', 'King': 'K', 'Ace': 'A'
+                '6': '6',
+                '7': '7',
+                '8': '8',
+                '9': '9',
+                '10': '10',
+                'Jack': 'В',
+                'Queen': 'Д',
+                'King': 'К',
+                'Ace': 'Т'
             };
 
             const rankOrder = ['6', '7', '8', '9', '10', 'Jack', 'Queen', 'King', 'Ace'];
 
-            function isValidCard(card) {
-                return card && card.rank && card.suit &&
-                       rankOrder.includes(card.rank) && Object.keys(suitSymbols).includes(card.suit);
-            }
-
-            function renderCard(card, clickable = false, role = null, isPending = false) {
-                if (!isValidCard(card)) {
-                    console.warn('game.html: Invalid card:', card);
+            function renderCard(card, clickable = false, role = null) {
+                if (!card || !card.rank || !card.suit) {
+                    console.warn('game.html: Invalid card data:', card);
                     return '';
                 }
                 const suitClass = card.suit.toLowerCase();
-                const isDisabled = clickable ? '' : 'disabled';
-                const pendingClass = isPending ? 'pending' : '';
-                const clickableClass = clickable ? 'clickable' : '';
+                const isDisabled = !clickable ? 'disabled' : '';
                 const displayRank = rankDisplay[card.rank] || card.rank;
                 return `
-                    <div class="card ${suitClass} ${isDisabled} ${pendingClass} ${clickableClass}"
-                         data-rank="${card.rank}" data-suit="${card.suit}" ${role ? `data-role="${role}"` : ''}>
+                    <div class="card ${suitClass} ${isDisabled}" data-rank="${card.rank}" data-suit="${card.suit}" ${role ? `data-role="${role}"` : ''}>
                         <div class="top-left">
                             <div class="rank">${displayRank}</div>
                             <div class="suit">${suitSymbols[card.suit]}</div>
@@ -367,7 +568,7 @@
             }
 
             function renderDeck(count) {
-                if (!Number.isInteger(count) || count < 0) return '';
+                if (count <= 0) return '';
                 let cards = '';
                 for (let i = 0; i < Math.min(count, 3); i++) {
                     const offset = i * 2;
@@ -376,61 +577,45 @@
                 return cards;
             }
 
-            function isValidAttackCard(card, table) {
-                if (!isValidCard(card)) return false;
-                if (!table || table.length === 0) return true;
-                return table.some(pair => pair.attack && pair.attack.rank === card.rank);
+            function isValidAttackCard(card, table, trumpSuit) {
+                if (!table.length) return true;
+                return table.some(pair => pair.attack.rank === card.rank);
             }
 
             function isValidDefenseCard(card, table, trumpSuit) {
-                if (!isValidCard(card) || !table || table.length === 0) return false;
                 const lastAttack = table.find(pair => pair.attack && !pair.defense);
-                if (!lastAttack || !isValidCard(lastAttack.attack)) return false;
-                return (card.suit === lastAttack.attack.suit &&
-                        rankOrder.indexOf(card.rank) > rankOrder.indexOf(lastAttack.attack.rank)) ||
-                       (trumpSuit && card.suit === trumpSuit);
+                if (!lastAttack) return false;
+                if (card.suit === lastAttack.attack.suit) {
+                    return rankOrder.indexOf(card.rank) > rankOrder.indexOf(lastAttack.attack.rank);
+                }
+                return card.suit === trumpSuit;
             }
 
-            function updateDebugInfo(state) {
-                const clickableCards = playerHandEl.querySelectorAll('.card.clickable').length;
-                const handRect = playerHandEl.getBoundingClientRect();
-                debugInfoEl.textContent = `Room: ${roomId}, Player: ${playerName}, ID: ${playerId || 'N/A'}, Attacker: ${state?.currentAttacker || 'N/A'}, Defender: ${state?.currentDefender || 'N/A'}, Clickable Cards: ${clickableCards}, Hand: (${handRect.left}, ${handRect.top}, ${handRect.width}x${handRect.height})`;
+            function updateDebugInfo() {
+                debugInfoEl.textContent = `${t('title')} - Room: ${roomId}, Player: ${playerName}, ID: ${playerId || 'Not assigned'}`;
             }
 
-            function showError(msg) {
-                errorMessageEl.textContent = msg;
-                setTimeout(() => errorMessageEl.textContent = '', 3000);
-            }
-
-            function handleCardClick(cardEl, e) {
-                if (cardEl.classList.contains('disabled')) {
-                    showError('Not your turn');
-                    return;
+            function resetTakeCardsState() {
+                isTakingCards = false;
+                takeCardsBtn.disabled = false;
+                takeCardsBtn.textContent = t('take_cards');
+                if (takeCardsTimeout) {
+                    clearTimeout(takeCardsTimeout);
+                    takeCardsTimeout = null;
                 }
-                const rank = cardEl.dataset.rank;
-                const suit = cardEl.dataset.suit;
-                const role = cardEl.dataset.role;
-                if (!rank || !suit || !role) {
-                    showError('Invalid card');
-                    return;
-                }
-                if (role === 'attack') {
-                    pendingAttackCard = { rank, suit };
-                } else if (role === 'defend') {
-                    pendingDefenseCard = { rank, suit };
-                }
-                socket.emit('playCard', { roomId, playerName, playerId, card: { rank, suit }, role });
             }
 
             function updateGameUI(data) {
-                if (!data || !data.players || data.players.length < 2) {
-                    console.error('game.html: Invalid game data:', data);
-                    showError('Invalid game data');
-                    return;
-                }
+                console.log('game.html: Updating UI with:', {
+                    players: data.players.map(p => ({ id: p.id, name: p.name })),
+                    trump: data.trump,
+                    deckCount: data.deckCount,
+                    currentAttacker: data.currentAttacker,
+                    currentDefender: data.currentDefender
+                });
 
-                const player = data.players.find(p => p.id === playerId);
-                const opponent = data.players.find(p => p.id !== playerId && !p.isDisconnected);
+                const player = data.players.find(p => p.name === playerName);
+                const opponents = data.players.filter(p => p.id !== (player ? player.id : null));
                 const currentAttacker = data.currentAttacker;
                 const currentDefender = data.currentDefender;
                 const table = data.table || [];
@@ -438,147 +623,340 @@
                 const trump = data.trump;
 
                 if (!player) {
-                    showError('Player not found');
-                    setTimeout(() => window.location.href = '/', 2000);
+                    console.error('game.html: Player not found:', { playerName, players: data.players });
+                    showError(t('error_invalid_data'));
+                    setTimeout(() => {
+                        localStorage.clear();
+                        window.location.href = '/';
+                    }, 2000);
                     return;
                 }
 
-                playerNameEl.textContent = `${player.name} (${player.id === currentAttacker ? 'Attacker' : player.id === currentDefender ? 'Defender' : 'Player'})`;
+                if (opponents.length < 1) {
+                    console.warn('game.html: Not enough opponents, waiting for reconnect');
+                    showError(t('waiting_reconnect'));
+                }
+
+                if (player.id !== playerId) {
+                    playerId = player.id;
+                    localStorage.setItem('playerId', playerId);
+                    console.log('game.html: Updated playerId:', playerId);
+                }
+
+                console.log('game.html: Roles:', { currentAttacker, currentDefender });
+
+                // Current player
+                playerNameEl.textContent = `${player.name} (${player.id === currentAttacker ? t('you_are_attacker') : player.id === currentDefender ? t('you_are_defender') : 'You'})${player.isDisconnected ? ' (Disconnected)' : ''}`;
                 playerNameEl.classList.toggle('highlight', player.id === currentAttacker || player.id === currentDefender);
 
-                const playerHand = Array.isArray(player.hand) ? player.hand.filter(isValidCard) : [];
-                playerHandEl.innerHTML = playerHand.map(card => {
-                    const isAttacker = player.id === currentAttacker;
-                    const isDefender = player.id === currentDefender;
-                    const isValidMove = isAttacker ? isValidAttackCard(card, table) : isDefender ? isValidDefenseCard(card, table, trump?.suit) : false;
-                    const clickable = isValidMove && !isTakingCards && !player.isDisconnected;
-                    const isPending = (isAttacker && pendingAttackCard && pendingAttackCard.rank === card.rank && pendingAttackCard.suit === card.suit) ||
-                                     (isDefender && pendingDefenseCard && pendingDefenseCard.rank === card.rank && pendingDefenseCard.suit === card.suit);
-                    return renderCard(card, clickable, isAttacker ? 'attack' : isDefender ? 'defend' : null, isPending);
-                }).join('');
-
-                const cardEls = playerHandEl.querySelectorAll('.card');
-                cardEls.forEach(cardEl => {
-                    cardEl.removeEventListener('click', cardEl._clickHandler);
-                    cardEl.removeEventListener('touchstart', cardEl._touchHandler);
-                    const handler = (e) => handleCardClick(cardEl, e);
-                    cardEl._clickHandler = handler;
-                    cardEl._touchHandler = handler;
-                    cardEl.addEventListener('click', handler);
-                    cardEl.addEventListener('touchstart', handler, { passive: true });
-                });
-
-                opponentsContainer.innerHTML = opponent ? `
-                    <div class="opponent-area">
-                        <h2 class="${opponent.id === currentAttacker || opponent.id === currentDefender ? 'highlight' : ''}">
-                            ${opponent.name} (${opponent.id === currentAttacker ? 'Attacker' : opponent.id === currentDefender ? 'Defender' : 'Player'})
+                // Dynamically render opponents
+                opponentsContainer.innerHTML = opponents.map((opponent, index) => `
+                    <div class="opponent-area" id="opponent-${index}">
+                        <h2 id="opponentName-${index}" class="${opponent.id === currentAttacker || opponent.id === currentDefender ? 'highlight' : ''}">
+                            ${opponent.name}${opponent.id === currentAttacker ? ` (${t('opponent_attacker')})` : opponent.id === currentDefender ? ` (${t('opponent_defender')})` : ''}${opponent.isDisconnected ? ' (Disconnected)' : ''}
                         </h2>
-                        <div class="hand">
-                            ${opponent.hand && opponent.hand.length > 0 ? opponent.hand.map(() => renderCardBack()).join('') : renderCardBack()}
+                        <div class="hand" id="opponentHand-${index}">
+                            ${opponent.hand.map(() => renderCardBack()).join('')}
                         </div>
                     </div>
-                ` : '';
+                `).join('');
 
-                tableEl.innerHTML = table.map((pair, index) => {
-                    if (!pair.attack || !isValidCard(pair.attack)) return '';
-                    let defenseCardHtml = pair.defense && isValidCard(pair.defense) ? renderCard(pair.defense, false, 'defense-card') : '';
-                    if (pendingDefenseCard && index === table.length - 1 && !pair.defense) {
-                        defenseCardHtml = renderCard(pendingDefenseCard, false, 'defense-card', true);
-                    }
-                    const isPendingAttack = pendingAttackCard && pendingAttackCard.rank === pair.attack.rank && pendingAttackCard.suit === pair.attack.suit;
-                    return `
-                        <div class="card-pair">
-                            ${renderCard(pair.attack, false, null, isPendingAttack)}
-                            ${defenseCardHtml}
-                        </div>
-                    `;
+                // Player hand
+                playerHandEl.innerHTML = player.hand.map(card => {
+                    const isAttacker = player.id === currentAttacker;
+                    const isDefender = player.id === currentDefender;
+                    const isValidMove = isAttacker ? isValidAttackCard(card, table, trump ? trump.suit : null) : isDefender ? isValidDefenseCard(card, table, trump ? trump.suit : null) : false;
+                    return renderCard(card, (isAttacker || isDefender) && isValidMove && !player.isDisconnected, isAttacker ? 'attack' : 'defend');
                 }).join('');
 
-                deckEl.innerHTML = renderDeck(deckCount);
-                deckCountEl.textContent = `Deck: ${deckCount}`;
-                trumpCardEl.innerHTML = trump && isValidCard(trump.card) ? renderCard(trump.card, false) : '';
+                // Table
+                tableEl.innerHTML = table.map(pair => `
+                    <div class="card-pair">
+                        ${pair.attack ? renderCard(pair.attack) : ''}
+                        ${pair.defense ? renderCard(pair.defense, false, 'defense-card') : ''}
+                    </div>
+                `).join('');
 
-                updateDebugInfo(data);
+                // Deck and trump
+                deckEl.innerHTML = renderDeck(deckCount);
+                deckCountEl.textContent = `${t('deck_label')}: ${deckCount}`;
+                console.log('game.html: Deck count:', deckCount);
+
+                if (trump && trump.card && trump.card.rank && trump.card.suit) {
+                    trumpCardEl.innerHTML = renderCard(trump.card, false);
+                    console.log('game.html: Trump card rendered:', trump.card);
+                } else {
+                    trumpCardEl.innerHTML = '';
+                    console.warn('game.html: No valid trump card received:', trump);
+                    showError(t('trump_card_error'));
+                }
+
+                // Buttons
+                const hasUnbeatenCards = table.some(pair => pair.attack && !pair.defense);
+                endTurnBtn.style.display = (currentDefender === player.id && !hasUnbeatenCards && !player.isDisconnected) ? 'inline-block' : 'none';
+                takeCardsBtn.style.display = (currentDefender === player.id && hasUnbeatenCards && !player.isDisconnected) ? 'inline-block' : 'none';
+                takeCardsBtn.disabled = !hasUnbeatenCards || isTakingCards;
+                takeCardsBtn.textContent = isTakingCards ? t('taking_cards') : t('take_cards');
+                updateDebugInfo();
+            }
+
+            function showError(msg) {
+                errorMessageEl.textContent = msg;
+                setTimeout(() => errorMessageEl.textContent = '', 3000);
+            }
+
+            function validateGameData(data) {
+                if (!data || !data.roomId || !data.playerName) {
+                    console.error('game.html: Invalid game data:', data);
+                    showError(t('error_invalid_data'));
+                    setTimeout(() => {
+                        localStorage.clear();
+                        window.location.href = '/';
+                    }, 2000);
+                    return false;
+                }
+                return true;
+            }
+
+            function restorePlayerSession() {
+                console.log('game.html: Restoring session for:', { roomId, playerId, playerName });
+                if (!validateGameData({ roomId, playerName })) return;
+                fetch(`/game/${roomId}`)
+                    .then(response => {
+                        if (!response.ok) throw new Error('Game fetch failed');
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('game.html: Game state received:', data);
+                        if (data.error) {
+                            showError(t('game_not_found'));
+                            setTimeout(() => {
+                                localStorage.clear();
+                                window.location.href = '/';
+                            }, 2000);
+                            return;
+                        }
+                        const player = data.players.find(p => p.name === playerName);
+                        if (player) {
+                            playerId = player.id;
+                            localStorage.setItem('playerId', playerId);
+                            console.log('game.html: Restored playerId:', playerId);
+                            socket.emit('reconnectPlayer', { roomId, playerId, playerName });
+                            updateGameUI(data);
+                        } else {
+                            console.error('game.html: Player not found in game:', { playerName });
+                            showError(t('error_invalid_data'));
+                            setTimeout(() => {
+                                localStorage.clear();
+                                window.location.href = '/';
+                            }, 2000);
+                        }
+                    })
+                    .catch(err => {
+                        console.error('game.html: Fetch error:', err);
+                        showError(t('fetch_error'));
+                    });
+            }
+
+            function attemptJoinRoom() {
+                if (joinAttemptCount >= maxJoinAttempts) {
+                    showError(t('error_invalid_data'));
+                    localStorage.clear();
+                    setTimeout(() => window.location.href = '/', 2000);
+                    return;
+                }
+                joinAttemptCount++;
+                console.log('game.html: Attempting to join room', roomId, 'attempt', joinAttemptCount, 'playerId:', playerId);
+                socket.emit('joinRoom', { roomId, playerName, playerId: playerId || '' });
+            }
+
+            function setupSocketListeners() {
+                socket.removeAllListeners('connect_error');
+                socket.removeAllListeners('roomJoined');
+                socket.removeAllListeners('startGame');
+                socket.removeAllListeners('updateGame');
+                socket.removeAllListeners('gamePaused');
+                socket.removeAllListeners('gameEnded');
+                socket.removeAllListeners('gameOver');
+                socket.removeAllListeners('errorMessage');
+                socket.removeAllListeners('setPlayerId');
+
+                socket.on('connect_error', (err) => {
+                    console.log('game.html: Connection error:', err.message);
+                    showError(t('server_error'));
+                });
+
+                socket.on('roomJoined', ({ roomId, playerId: newPlayerId, playerName: serverPlayerName }) => {
+                    console.log('game.html: Room joined:', { roomId, newPlayerId, serverPlayerName });
+                    if (serverPlayerName !== playerName) {
+                        console.error('game.html: Player name mismatch:', { expected: playerName, received: serverPlayerName });
+                        showError(t('error_invalid_data'));
+                        setTimeout(() => {
+                            localStorage.clear();
+                            window.location.href = '/';
+                        }, 2000);
+                        return;
+                    }
+                    playerId = newPlayerId;
+                    localStorage.setItem('playerId', playerId);
+                    localStorage.setItem('playerName', playerName);
+                    localStorage.setItem('roomId', roomId);
+                    updateDebugInfo();
+                });
+
+                socket.on('startGame', ({ trump, currentAttacker, currentDefender }) => {
+                    console.log('game.html: Received startGame:', { trump, currentAttacker, currentDefender });
+                    if (trump && trump.card && trump.card.rank && trump.card.suit) {
+                        trumpCardEl.innerHTML = renderCard(trump.card, false);
+                        console.log('game.html: Trump card set on startGame:', trump.card);
+                    } else {
+                        console.warn('game.html: Invalid trump card on startGame:', trump);
+                        showError(t('trump_card_error'));
+                    }
+                });
+
+                socket.on('updateGame', (data) => {
+                    console.log('game.html: Received updateGame:', data);
+                    resetTakeCardsState();
+                    updateGameUI(data);
+                });
+
+                socket.on('gamePaused', ({ message }) => {
+                    console.log('game.html: Game paused:', message);
+                    showError(t('waiting_reconnect'));
+                    const actionButtons = document.querySelectorAll('#endTurnBtn, #takeCardsBtn, .card');
+                    actionButtons.forEach(btn => btn.disabled = true);
+                });
+
+                socket.on('gameEnded', ({ winner }) => {
+                    console.log('game.html: Game ended, winner:', winner);
+                    const isWinner = winner === playerName;
+                    gameOverMessage.textContent = isWinner ? t('you_win') : t('you_lose');
+                    gameOverModal.style.display = 'flex';
+                    localStorage.clear();
+                });
+
+                socket.on('gameOver', ({ winners }) => {
+                    console.log('game.html: Game over, winners:', winners);
+                    const isWinner = winners.includes(playerName);
+                    gameOverMessage.textContent = isWinner ? t('you_win') : t('you_lose');
+                    gameOverModal.style.display = 'flex';
+                    localStorage.clear();
+                });
+
+                socket.on('errorMessage', (msg) => {
+                    console.log('game.html: Error:', msg);
+                    resetTakeCardsState();
+                    if (msg.includes('Another session has taken over this player')) {
+                        showError(t('error_session_taken'));
+                        localStorage.clear();
+                        setTimeout(() => window.location.href = '/', 2000);
+                        return;
+                    }
+                    showError(msg);
+                    if (msg.includes('Room does not exist') || msg.includes('Game room does not exist') || msg.includes('Player not found')) {
+                        localStorage.clear();
+                        setTimeout(() => window.location.href = '/', 2000);
+                    }
+                });
+
+                socket.on('setPlayerId', (newPlayerId) => {
+                    console.log('game.html: Received new playerId:', newPlayerId);
+                    playerId = newPlayerId;
+                    localStorage.setItem('playerId', playerId);
+                    attemptJoinRoom();
+                });
+
+                socket.on('roomDeleted', (message) => {
+                    console.log('game.html: Room deleted:', message);
+                    showError(message);
+                    localStorage.clear();
+                    setTimeout(() => window.location.href = '/', 2000);
+                });
             }
 
             socket.on('connect', () => {
                 console.log('game.html: Socket connected:', socket.id);
-                socket.emit('joinRoom', { roomId, playerName, playerId });
+                joinAttemptCount = 0;
+                if (!validateGameData({ roomId, playerName })) {
+                    restorePlayerSession();
+                    return;
+                }
+                setupSocketListeners();
                 socket.emit('reconnectPlayer', { roomId, playerId, playerName });
+                attemptJoinRoom();
             });
 
-            socket.on('roomJoined', ({ roomId: joinedRoomId, playerId: newPlayerId, playerName: joinedPlayerName }) => {
-                roomId = joinedRoomId;
-                playerId = newPlayerId;
-                playerName = joinedPlayerName;
-                localStorage.setItem('roomId', roomId);
-                localStorage.setItem('playerId', playerId);
+            window.addEventListener('beforeunload', () => {
+                console.log('game.html: Window unloading, sending tempDisconnect');
+                socket.emit('tempDisconnect', { roomId, playerId, playerName });
+                localStorage.setItem('playerId', playerId || '');
                 localStorage.setItem('playerName', playerName);
-                console.log('game.html: Room joined:', { roomId, playerId, playerName });
+                localStorage.setItem('roomId', roomId);
             });
 
-            socket.on('updateGame', (data) => {
-                console.log('game.html: Received updateGame:', data);
-                window.lastGameState = data;
-                pendingAttackCard = null;
-                pendingDefenseCard = null;
-                isTakingCards = false;
-                updateGameUI(data);
-            });
+            playerHandEl.addEventListener('click', (e) => {
+                const cardEl = e.target.closest('.card');
+                if (!cardEl || cardEl.classList.contains('disabled')) {
+                    showError(t('not_your_turn'));
+                    return;
+                }
 
-            socket.on('buttonState', ({ showEndTurn, showTakeCards, isDefender }) => {
-                endTurnBtn.style.display = isDefender && showEndTurn ? 'inline-block' : 'none';
-                takeCardsBtn.style.display = isDefender && showTakeCards ? 'inline-block' : 'none';
-                takeCardsBtn.disabled = isTakingCards;
-            });
+                const rank = cardEl.dataset.rank;
+                const suit = cardEl.dataset.suit;
+                const role = cardEl.dataset.role;
 
-            socket.on('errorMessage', (msg) => {
-                console.log('game.html: Error:', msg);
-                showError(msg);
-                pendingAttackCard = null;
-                pendingDefenseCard = null;
-                isTakingCards = false;
-                updateGameUI(window.lastGameState || {});
-            });
+                if (!rank || !suit || !role) {
+                    console.warn('game.html: Invalid card data:', { rank, suit, role });
+                    showError(t('invalid_move'));
+                    return;
+                }
 
-            socket.on('gameOver', ({ winners }) => {
-                showError(`Game Over! Winner: ${winners.join(', ')}`);
-                setTimeout(() => window.location.href = '/', 5000);
-            });
-
-            socket.on('playerReconnected', ({ playerName }) => {
-                showError(`${playerName} reconnected`);
-            });
-
-            socket.on('roomDeleted', (msg) => {
-                showError(msg);
-                setTimeout(() => window.location.href = '/', 3000);
+                console.log('game.html: Playing card:', { rank, suit, role, playerId });
+                socket.emit('playCard', {
+                    roomId,
+                    playerName,
+                    playerId,
+                    card: { rank, suit },
+                    role
+                });
             });
 
             endTurnBtn.addEventListener('click', () => {
-                console.log('game.html: Ending turn:', { playerId, playerName });
+                console.log('game.html: Ending turn for player:', { playerId, playerName });
                 socket.emit('endTurn', { roomId, playerId, playerName });
             });
 
             takeCardsBtn.addEventListener('click', () => {
-                if (isTakingCards) return;
-                console.log('game.html: Taking cards:', { playerId, playerName });
+                if (isTakingCards) {
+                    console.warn('game.html: Take Cards action blocked: already in progress');
+                    showError(t('not_your_turn'));
+                    return;
+                }
+
+                console.log('game.html: Taking cards for player:', { playerId, playerName, roomId });
                 isTakingCards = true;
                 takeCardsBtn.disabled = true;
+                takeCardsBtn.textContent = t('taking_cards');
+
                 socket.emit('takeCards', { roomId, playerId, playerName });
-                setTimeout(() => {
-                    isTakingCards = false;
-                    takeCardsBtn.disabled = false;
-                }, 2000);
+
+                takeCardsTimeout = setTimeout(() => {
+                    console.warn('game.html: takeCards action timed out');
+                    resetTakeCardsState();
+                    showError(t('timeout_error'));
+                }, 5000);
             });
 
-            window.addEventListener('beforeunload', () => {
-                socket.emit('tempDisconnect', { roomId, playerId, playerName });
+            returnToLobby.addEventListener('click', () => {
+                console.log('game.html: Returning to lobby');
+                socket.emit('leaveGame', { roomId, playerId, playerName });
+                window.location.href = '/';
             });
 
-            // Initial join
-            socket.emit('joinRoom', { roomId, playerName, playerId });
-            socket.emit('reconnectPlayer', { roomId, playerId, playerName });
+            // Initial setup
+            setupSocketListeners();
+            attemptJoinRoom();
         });
     </script>
 </body>
