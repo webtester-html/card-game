@@ -38,33 +38,16 @@
             font-size: 14px;
             border-radius: 4px;
         }
-        .player-area {
-            width: 100%;
-            text-align: center;
-            position: absolute;
-            bottom: 20px;
-        }
-        .opponents-container {
-            width: 100%;
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            position: absolute;
-            top: 20px;
-            gap: 20px;
-        }
+        .player-area,
         .opponent-area {
+            width: 100%;
             text-align: center;
-            flex: 1;
-            min-width: 150px;
-            max-width: 250px;
         }
         .player-area h2,
         .opponent-area h2 {
             margin: 10px 0;
             color: white;
             text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
-            font-size: 1.2em;
         }
         .player-area .highlight,
         .opponent-area .highlight {
@@ -131,7 +114,7 @@
             gap: 10px;
             flex-wrap: wrap;
         }
-        .opponent-area .hand .card {
+        .opponent-hand .card {
             transform: scale(0.7);
         }
         .card {
@@ -271,7 +254,7 @@
                 margin-top: -80px;
                 margin-left: 48px;
             }
-            .opponent-area .hand .card {
+            .opponent-hand .card {
                 transform: scale(0.6);
             }
             .deck-area {
@@ -281,14 +264,6 @@
             #takeCardsBtn {
                 padding: 8px 16px;
                 font-size: 14px;
-            }
-            .opponents-container {
-                flex-direction: column;
-                align-items: center;
-            }
-            .opponent-area {
-                min-width: 100px;
-                max-width: 200px;
             }
         }
         @media (max-width: 480px) {
@@ -311,7 +286,7 @@
                 margin-top: -60px;
                 margin-left: 36px;
             }
-            .opponent-area .hand .card {
+            .opponent-hand .card {
                 transform: scale(0.5);
             }
             .game-container {
@@ -319,7 +294,7 @@
             }
             .player-area h2,
             .opponent-area h2 {
-                font-size: 1em;
+                font-size: 1.2em;
             }
             #endTurnBtn,
             #takeCardsBtn {
@@ -339,7 +314,10 @@
             </select>
         </div>
         <div class="debug-info" id="debugInfo"></div>
-        <div class="opponents-container" id="opponentsContainer"></div>
+        <div class="opponent-area">
+            <h2 id="opponentName"></h2>
+            <div class="hand opponent-hand" id="opponentHand"></div>
+        </div>
         <div class="table-area" id="table"></div>
         <div class="deck-area">
             <div class="deck" id="deck"></div>
@@ -459,8 +437,9 @@
                 reconnectionDelay: 1000
             });
             const playerNameEl = document.getElementById('playerName');
-            const opponentsContainer = document.getElementById('opponentsContainer');
+            const opponentNameEl = document.getElementById('opponentName');
             const playerHandEl = document.getElementById('playerHand');
+            const opponentHandEl = document.getElementById('opponentHand');
             const tableEl = document.getElementById('table');
             const deckEl = document.getElementById('deck');
             const trumpCardEl = document.getElementById('trumpCard');
@@ -615,7 +594,7 @@
                 });
 
                 const player = data.players.find(p => p.name === playerName);
-                const opponents = data.players.filter(p => p.id !== (player ? player.id : null));
+                const opponent = data.players.find(p => p.id !== (player ? player.id : null));
                 const currentAttacker = data.currentAttacker;
                 const currentDefender = data.currentDefender;
                 const table = data.table || [];
@@ -632,8 +611,8 @@
                     return;
                 }
 
-                if (opponents.length < 1) {
-                    console.warn('game.html: Not enough opponents, waiting for reconnect');
+                if (!opponent) {
+                    console.warn('game.html: Opponent not found, waiting for reconnect');
                     showError(t('waiting_reconnect'));
                 }
 
@@ -645,39 +624,24 @@
 
                 console.log('game.html: Roles:', { currentAttacker, currentDefender });
 
-                // Current player
                 playerNameEl.textContent = `${player.name} (${player.id === currentAttacker ? t('you_are_attacker') : player.id === currentDefender ? t('you_are_defender') : 'You'})${player.isDisconnected ? ' (Disconnected)' : ''}`;
+                opponentNameEl.textContent = opponent ? `${opponent.name}${opponent.id === currentAttacker ? ` (${t('opponent_attacker')})` : opponent.id === currentDefender ? ` (${t('opponent_defender')})` : ''}${opponent.isDisconnected ? ' (Disconnected)' : ''}` : t('opponent_waiting');
                 playerNameEl.classList.toggle('highlight', player.id === currentAttacker || player.id === currentDefender);
+                opponentNameEl.classList.toggle('highlight', opponent && (opponent.id === currentAttacker || opponent.id === currentDefender));
 
-                // Dynamically render opponents
-                opponentsContainer.innerHTML = opponents.map((opponent, index) => `
-                    <div class="opponent-area" id="opponent-${index}">
-                        <h2 id="opponentName-${index}" class="${opponent.id === currentAttacker || opponent.id === currentDefender ? 'highlight' : ''}">
-                            ${opponent.name}${opponent.id === currentAttacker ? ` (${t('opponent_attacker')})` : opponent.id === currentDefender ? ` (${t('opponent_defender')})` : ''}${opponent.isDisconnected ? ' (Disconnected)' : ''}
-                        </h2>
-                        <div class="hand" id="opponentHand-${index}">
-                            ${opponent.hand.map(() => renderCardBack()).join('')}
-                        </div>
-                    </div>
-                `).join('');
-
-                // Player hand
                 playerHandEl.innerHTML = player.hand.map(card => {
                     const isAttacker = player.id === currentAttacker;
                     const isDefender = player.id === currentDefender;
                     const isValidMove = isAttacker ? isValidAttackCard(card, table, trump ? trump.suit : null) : isDefender ? isValidDefenseCard(card, table, trump ? trump.suit : null) : false;
                     return renderCard(card, (isAttacker || isDefender) && isValidMove && !player.isDisconnected, isAttacker ? 'attack' : 'defend');
                 }).join('');
-
-                // Table
+                opponentHandEl.innerHTML = opponent ? opponent.hand.map(() => renderCardBack()).join('') : '';
                 tableEl.innerHTML = table.map(pair => `
                     <div class="card-pair">
                         ${pair.attack ? renderCard(pair.attack) : ''}
                         ${pair.defense ? renderCard(pair.defense, false, 'defense-card') : ''}
                     </div>
                 `).join('');
-
-                // Deck and trump
                 deckEl.innerHTML = renderDeck(deckCount);
                 deckCountEl.textContent = `${t('deck_label')}: ${deckCount}`;
                 console.log('game.html: Deck count:', deckCount);
@@ -691,7 +655,6 @@
                     showError(t('trump_card_error'));
                 }
 
-                // Buttons
                 const hasUnbeatenCards = table.some(pair => pair.attack && !pair.defense);
                 endTurnBtn.style.display = (currentDefender === player.id && !hasUnbeatenCards && !player.isDisconnected) ? 'inline-block' : 'none';
                 takeCardsBtn.style.display = (currentDefender === player.id && hasUnbeatenCards && !player.isDisconnected) ? 'inline-block' : 'none';
