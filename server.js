@@ -24,7 +24,7 @@ const dbPath = process.env.DATABASE_URL || 'postgresql://durak_game_db_user:sYBK
 function checkDatabasePermissions() {
     try {
         console.log('Using remote PostgreSQL database');
-        console.log('Database URL:', dbUrl);
+        console.log('Database URL:', dbPath);
     } catch (err) {
         console.error('Error with database config:', err.message);
         process.exit(1);
@@ -34,7 +34,7 @@ checkDatabasePermissions();
 
 // Підключення до PostgreSQL
 const client = new Client({
-    connectionString: dbUrl,
+    connectionString: dbPath,
     ssl: {
         rejectUnauthorized: false // для Render
     }
