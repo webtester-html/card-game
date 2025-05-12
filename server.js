@@ -5,6 +5,7 @@ const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const sqlite3 = require('sqlite3');
 
 // Initialize Express and HTTP server
 const app = express();
