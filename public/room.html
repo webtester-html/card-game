@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Card Game</title>
+    <title>Durak Room</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -13,699 +13,471 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
-            overflow: auto;
-            pointer-events: auto !important; /* Override external CSS */
-        }
-        #game-container {
-            position: relative;
-            width: 100%;
-            max-width: 1200px;
             height: 100vh;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            align-items: center;
-            padding: 20px;
-            box-sizing: border-box;
-            pointer-events: none; /* Prevent clicks on container */
         }
-        .player-area {
-            width: 100%;
-            text-align: center;
-            position: absolute;
-            bottom: 20px;
-            z-index: 100;
-            pointer-events: auto !important;
-        }
-        .opponents-container {
-            width: 100%;
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            position: absolute;
-            top: 20px;
-            gap: 20px;
-            z-index: 20;
-            pointer-events: none;
-        }
-        .opponent-area {
-            text-align: center;
-            flex: 1;
-            min-width: 150px;
-            max-width: 250px;
-            pointer-events: none;
-        }
-        .opponent-area .hand {
-            display: grid;
-            grid-template-columns: repeat(6, 1fr);
-            gap: 8px;
-            justify-items: center;
-        }
-        .player-area h2,
-        .opponent-area h2 {
-            margin: 10px 0;
-            color: white;
-            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
-            font-size: 1.2em;
-        }
-        .player-area .highlight,
-        .opponent-area .highlight {
-            background-color: rgba(255, 255, 0, 0.3);
-            padding: 5px;
-            border-radius: 4px;
-        }
-        .debug-info {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            color: white;
-            font-size: 12px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 5px;
-            border-radius: 4px;
-            z-index: 200;
-            pointer-events: none;
-        }
-        .deck-area {
-            position: absolute;
-            left: 20px;
-            top: 50%;
-            transform: translateY(-50%);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            z-index: 10;
-            pointer-events: none;
-        }
-        .deck {
-            position: relative;
-        }
-        .trump-card {
-            margin-top: 15px;
-            transform: rotate(-90deg);
-        }
-        .trump-card .card {
-            width: 120px;
-            height: 168px;
-            border: 2px solid #ffd700;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
-        }
-        .deck-count {
-            color: white;
-            font-size: 14px;
-            margin-top: 10px;
-            text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.5);
-        }
-        .table-area {
-            flex-grow: 1;
-            width: 100%;
-            display: grid;
-            grid-template-columns: repeat(6, 1fr);
-            gap: 20px;
-            justify-items: center;
-            align-content: center;
-            padding: 20px;
-            margin-left: 150px;
-            box-sizing: border-box;
-            position: relative;
-            z-index: 25;
-            pointer-events: none;
-        }
-        .card-pair {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 10px;
-        }
-        .hand {
-            display: flex;
-            justify-content: center;
-            gap: 10px;
-            flex-wrap: wrap;
-            border: 2px solid red;
-            pointer-events: auto !important;
-        }
-        .opponent-area .hand {
-            pointer-events: none;
-        }
-        .opponent-area .hand .card {
-            transform: scale(0.7);
-        }
-        .card {
-            width: 100px;
-            height: 140px;
+        .container {
             background: white;
-            border: 1px solid #000;
+            padding: 20px;
             border-radius: 8px;
-            box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.3);
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            padding: 8px;
-            box-sizing: border-box;
-            position: relative;
-            cursor: pointer;
-            transition: transform 0.2s, border 0.2s;
-            color: red;
-            pointer-events: auto !important;
-            z-index: 101;
-            animation: flashBorder 1s infinite;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+            text-align: center;
+            width: 100%;
+            max-width: 600px;
         }
-        @keyframes flashBorder {
-            0% { border-color: green; }
-            50% { border-color: blue; }
-            100% { border-color: green; }
+        h1 {
+            margin: 0 0 20px;
+            color: #d32f2f;
         }
-        .card.clickable {
-            border: 2px solid green;
-            animation: none;
+        .room-info {
+            margin-bottom: 20px;
         }
-        .card:hover:not(.disabled) {
-            transform: translateY(-5px);
-        }
-        .card.disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            border: 1px solid #000;
-            animation: none;
-        }
-        .card.pending {
-            opacity: 0.7;
-            border: 2px dashed #ffd700;
-            transform: scale(1.05);
-            animation: none;
-        }
-        .card-back {
-            background: repeating-linear-gradient(45deg, #b71c1c, #b71c1c 10px, #d32f2f 10px, #d32f2f 20px);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 14px;
-        }
-        .card .rank {
-            font-size: 18px;
+        .room-info span {
             font-weight: bold;
+            color: #4CAF50;
         }
-        .card .suit {
-            font-size: 24px;
+        ul {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 20px;
+            text-align: left;
         }
-        .card .top-left,
-        .card .bottom-right {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
+        ul li {
+            padding: 5px 0;
+            font-size: 16px;
         }
-        .card .bottom-right {
-            transform: rotate(180deg);
+        ul li.ready {
+            color: #4CAF50;
         }
-        .defense-card {
-            margin-top: -100px;
-            margin-left: 60px;
-            transform: rotate(10deg);
-        }
-        #endTurnBtn,
-        #takeCardsBtn,
-        #testPlayCardBtn {
+        button {
+            display: inline-block;
+            margin: 10px 5px;
             padding: 10px 20px;
             font-size: 16px;
-            background-color: #0288d1;
-            color: white;
             border: none;
             border-radius: 4px;
             cursor: pointer;
-            margin: 10px;
-            display: none;
-            pointer-events: auto !important;
+            color: white;
         }
-        #endTurnBtn:hover:not(:disabled),
-        #takeCardsBtn:hover:not(:disabled),
-        #testPlayCardBtn:hover:not(:disabled) {
-            background-color: #0277bd;
+        #readyBtn {
+            background-color: #4CAF50;
         }
-        #endTurnBtn:disabled,
-        #takeCardsBtn:disabled,
-        #testPlayCardBtn:disabled {
-            background-color: #b0bec5;
+        #readyBtn:disabled {
+            background-color: #cccccc;
             cursor: not-allowed;
         }
-        #errorMessage {
-            color: #ff5252;
-            margin: 10px 0;
-            text-align: center;
-            text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.5);
+        #leaveRoomBtn {
+            background-color: #d32f2f;
         }
-        @media (max-width: 768px) {
-            .table-area {
-                grid-template-columns: repeat(4, 1fr);
-                margin-left: 120px;
+        button:hover:not(:disabled) {
+            opacity: 0.9;
+        }
+        #errorMessage {
+            color: #d32f2f;
+            margin-top: 10px;
+            min-height: 20px;
+        }
+        .chat-box {
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            height: 150px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            padding: 10px;
+            background: #f9f9f9;
+            text-align: left;
+        }
+        #chatInput {
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        @media (max-width: 480px) {
+            .container {
+                width: 90%;
+                padding: 15px;
             }
-            .opponent-area .hand {
-                grid-template-columns: repeat(4, 1fr);
+            h1 {
+                font-size: 1.5em;
             }
-            .card {
-                width: 80px;
-                height: 112px;
-                padding: 6px;
+            button, #chatInput {
+                font-size: 14px;
+                padding: 8px;
             }
-            .trump-card .card {
-                width: 96px;
-                height: 134.4px;
+            .chat-box {
+                height: 100px;
             }
         }
     </style>
 </head>
 <body>
-    <div id="game-container">
-        <div class="debug-info" id="debugInfo"></div>
-        <div class="opponents-container" id="opponentsContainer"></div>
-        <div class="table-area" id="table"></div>
-        <div class="deck-area">
-            <div class="deck" id="deck"></div>
-            <div class="trump-card" id="trumpCard"></div>
-            <div class="deck-count" id="deckCount"></div>
+    <div class="container">
+        <h1 id="title">Durak Room</h1>
+        <div class="room-info">
+            <p id="roomCodeLabel">Room Code: <span id="roomCode"></span></p>
+            <p id="playerCountLabel">Players: <span id="playerCount">0/0</span></p>
         </div>
-        <div class="player-area">
-            <h2 id="playerName"></h2>
-            <div class="hand" id="playerHand"></div>
-            <button id="endTurnBtn">End Turn</button>
-            <button id="takeCardsBtn">Take Cards</button>
-            <button id="testPlayCardBtn">Test Play Card</button>
-            <div id="errorMessage"></div>
-        </div>
+        <ul id="playerList"></ul>
+        <button id="readyBtn">Ready</button>
+        <button id="leaveRoomBtn">Exit Room</button>
+        <div class="chat-box" id="chatBox"></div>
+        <input type="text" id="chatInput" placeholder="Type a message...">
+        <div id="errorMessage"></div>
     </div>
+
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        try {
-            console.log('game.html: Script started');
+        console.log('room.html: Script started');
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('room.html: DOM fully loaded');
 
-            // Browser detection
-            const ua = navigator.userAgent;
-            const browserInfo = {
-                browser: ua.includes('Chrome') ? 'Chrome' : ua.includes('Firefox') ? 'Firefox' : ua.includes('Safari') ? 'Safari' : 'Unknown',
-                version: ua.match(/(Chrome|Firefox|Safari)\/([\d.]+)/)?.[2] || 'Unknown',
-                jsEnabled: typeof window.addEventListener === 'function'
+            const socket = io({
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 2000
+            });
+            const roomCodeSpan = document.getElementById('roomCode');
+            const playerList = document.getElementById('playerList');
+            const playerCount = document.getElementById('playerCount');
+            const readyBtn = document.getElementById('readyBtn');
+            const leaveRoomBtn = document.getElementById('leaveRoomBtn');
+            const errorMessage = document.getElementById('errorMessage');
+            const chatBox = document.getElementById('chatBox');
+            const chatInput = document.getElementById('chatInput');
+
+            if (!readyBtn || !leaveRoomBtn) {
+                console.error('room.html: Required buttons not found');
+                errorMessage.textContent = 'Required buttons not found.';
+                return;
+            }
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomId = urlParams.get('room');
+            let playerId = localStorage.getItem('playerId');
+            let playerName = localStorage.getItem('playerName');
+            let language = localStorage.getItem('language') || 'en';
+            let isJoined = localStorage.getItem('isJoined') === 'true';
+
+            console.log('room.html: Initial data:', { roomId, playerId, playerName, language, isJoined });
+            console.log('room.html: localStorage contents:', {
+                playerId: localStorage.getItem('playerId'),
+                playerName: localStorage.getItem('playerName'),
+                language: localStorage.getItem('language'),
+                isJoined: localStorage.getItem('isJoined')
+            });
+
+            if (!roomId || !playerName || !playerId || playerName === 'undefined') {
+                console.error('room.html: Missing or invalid required data', { roomId, playerName, playerId });
+                errorMessage.textContent = 'Invalid room or player data. Redirecting to lobby...';
+                localStorage.clear();
+                setTimeout(() => window.location.href = '/', 5000);
+                return;
+            }
+
+            let joinAttemptCount = 0;
+            const maxJoinAttempts = 5;
+
+            roomCodeSpan.textContent = roomId;
+            playerCount.textContent = '0/0';
+
+            const translations = {
+                en: {
+                    title: 'Durak Room',
+                    roomCodeLabel: 'Room Code:',
+                    playerCountLabel: 'Players:',
+                    readyBtn: 'Ready',
+                    readyWaiting: 'Ready (Waiting)',
+                    leaveRoomBtn: 'Exit Room',
+                    chatPlaceholder: 'Type a message...',
+                    disconnected: 'disconnected'
+                },
+                uk: {
+                    title: 'Кімната Дурак',
+                    roomCodeLabel: 'Код кімнати:',
+                    playerCountLabel: 'Гравці:',
+                    readyBtn: 'Готовий',
+                    readyWaiting: 'Готовий (Очікування)',
+                    leaveRoomBtn: 'Вийти з кімнати',
+                    chatPlaceholder: 'Введіть повідомлення...',
+                    disconnected: 'відключений'
+                },
+                ru: {
+                    title: 'Комната Дурак',
+                    roomCodeLabel: 'Код комнаты:',
+                    playerCountLabel: 'Игроки:',
+                    readyBtn: 'Готов',
+                    readyWaiting: 'Готов (Ожидание)',
+                    leaveRoomBtn: 'Выйти из комнаты',
+                    chatPlaceholder: 'Введите сообщение...',
+                    disconnected: 'отключен'
+                }
             };
-            console.log('game.html: Browser info:', JSON.stringify(browserInfo));
 
-            document.addEventListener('DOMContentLoaded', () => {
-                console.log('game.html: DOMContentLoaded fired');
+            function t(key) {
+                return translations[language][key] || translations.en[key] || key;
+            }
 
-                // Verify Socket.IO
-                if (!window.io) {
-                    console.error('game.html: Socket.IO not loaded');
-                    document.getElementById('errorMessage').textContent = 'Socket.IO failed to load';
+            function updateUIText() {
+                document.getElementById('title').textContent = t('title');
+                document.getElementById('roomCodeLabel').childNodes[0].textContent = t('roomCodeLabel') + ' ';
+                document.getElementById('playerCountLabel').childNodes[0].textContent = t('playerCountLabel') + ' ';
+                readyBtn.textContent = readyBtn.disabled ? t('readyWaiting') : t('readyBtn');
+                leaveRoomBtn.textContent = t('leaveRoomBtn');
+                chatInput.placeholder = t('chatPlaceholder');
+            }
+
+            updateUIText();
+
+            function showError(msg) {
+                errorMessage.textContent = msg;
+                setTimeout(() => errorMessage.textContent = '', 5000);
+            }
+
+            function debounce(func, wait) {
+                let timeout;
+                return function(...args) {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(() => func.apply(this, args), wait);
+                };
+            }
+
+            const attemptJoinRoom = debounce(() => {
+                if (isJoined) {
+                    console.log('room.html: Already joined, skipping attemptJoinRoom');
                     return;
                 }
-
-                const socket = io();
-                const playerNameEl = document.getElementById('playerName');
-                const opponentsContainer = document.getElementById('opponentsContainer');
-                const playerHandEl = document.getElementById('playerHand');
-                const tableEl = document.getElementById('table');
-                const deckEl = document.getElementById('deck');
-                const trumpCardEl = document.getElementById('trumpCard');
-                const deckCountEl = document.getElementById('deckCount');
-                const endTurnBtn = document.getElementById('endTurnBtn');
-                const takeCardsBtn = document.getElementById('takeCardsBtn');
-                const testPlayCardBtn = document.getElementById('testPlayCardBtn');
-                const errorMessageEl = document.getElementById('errorMessage');
-                const debugInfoEl = document.getElementById('debugInfo');
-                let pendingAttackCard = null;
-                let pendingDefenseCard = null;
-                let isTakingCards = false;
-
-                console.log('game.html: Elements initialized:', JSON.stringify({
-                    playerHandExists: !!playerHandEl,
-                    cardCount: playerHandEl?.querySelectorAll('.card').length
-                }));
-
-                const urlParams = new URLSearchParams(window.location.search);
-                const roomId = urlParams.get('room');
-                let playerName = localStorage.getItem('playerName');
-                let playerId = localStorage.getItem('playerId');
-
-                console.log('game.html: Initial data:', JSON.stringify({ roomId, playerName, playerId }));
-
-                if (!roomId || !playerName) {
-                    console.error('game.html: Missing roomId or playerName');
-                    errorMessageEl.textContent = 'Invalid room or player';
+                if (joinAttemptCount >= maxJoinAttempts) {
+                    showError('Too many join attempts. Redirecting to lobby.');
+                    localStorage.clear();
                     setTimeout(() => window.location.href = '/', 2000);
                     return;
                 }
-
-                const suitSymbols = {
-                    Hearts: '♥',
-                    Diamonds: '♦',
-                    Clubs: '♣',
-                    Spades: '♠'
-                };
-
-                const rankDisplay = {
-                    '6': '6', '7': '7', '8': '8', '9': '9', '10': '10',
-                    'Jack': 'В', 'Queen': 'Д', 'King': 'К', 'Ace': 'Т'
-                };
-
-                const rankOrder = ['6', '7', '8', '9', '10', 'Jack', 'Queen', 'King', 'Ace'];
-
-                function isValidCard(card) {
-                    return card && card.rank && card.suit &&
-                           rankOrder.includes(card.rank) && Object.keys(suitSymbols).includes(card.suit);
+                if (!playerName || playerName === 'undefined') {
+                    console.error('room.html: Player name is invalid, redirecting to lobby');
+                    showError('Player not found.');
+                    localStorage.clear();
+                    setTimeout(() => window.location.href = '/', 2000);
+                    return;
                 }
+                joinAttemptCount++;
+                console.log('room.html: Attempting to join room:', { roomId, playerName, playerId, attempt: joinAttemptCount });
+                socket.emit('joinRoom', { roomId, playerName, playerId, language });
+                socket.emit('requestPlayerUpdate', roomId);
+            }, 1000);
 
-                function renderCard(card, clickable = false, role = null, isPending = false) {
-                    if (!isValidCard(card)) {
-                        console.warn('game.html: Invalid card:', JSON.stringify(card));
-                        return '';
-                    }
-                    const suitClass = card.suit.toLowerCase();
-                    const isDisabled = clickable ? '' : 'disabled';
-                    const pendingClass = isPending ? 'pending' : '';
-                    const clickableClass = clickable ? 'clickable' : '';
-                    const displayRank = rankDisplay[card.rank] || card.rank;
-                    console.log('game.html: Rendering card:', JSON.stringify({
-                        card, clickable, role, isPending, isDisabled: !!isDisabled
-                    }));
-                    return `
-                        <div class="card ${suitClass} ${isDisabled} ${pendingClass} ${clickableClass}"
-                             data-rank="${card.rank}" data-suit="${card.suit}" ${role ? `data-role="${role}"` : ''}>
-                            <div class="top-left">
-                                <div class="rank">${displayRank}</div>
-                                <div class="suit">${suitSymbols[card.suit]}</div>
-                            </div>
-                            <div class="bottom-right">
-                                <div class="rank">${displayRank}</div>
-                                <div class="suit">${suitSymbols[card.suit]}</div>
-                            </div>
-                        </div>
-                    `;
-                }
-
-                function renderCardBack() {
-                    return `<div class="card card-back"></div>`;
-                }
-
-                function renderDeck(count) {
-                    if (!Number.isInteger(count) || count < 0) return '';
-                    let cards = '';
-                    for (let i = 0; i < Math.min(count, 3); i++) {
-                        const offset = i * 2;
-                        cards += `<div class="card card-back" style="position: absolute; top: ${offset}px; left: ${offset}px;"></div>`;
-                    }
-                    return cards;
-                }
-
-                function isValidAttackCard(card, table) {
-                    if (!isValidCard(card)) {
-                        console.warn('game.html: Invalid attack card:', JSON.stringify(card));
-                        return false;
-                    }
-                    if (!table || table.length === 0) {
-                        console.log('game.html: Table empty, any card is valid for attack');
-                        return true;
-                    }
-                    const isValid = table.some(pair => pair.attack && pair.attack.rank === card.rank);
-                    console.log('game.html: Validating attack card:', JSON.stringify({
-                        card, tableRanks: table.map(p => p.attack?.rank), isValid
-                    }));
-                    return isValid;
-                }
-
-                function isValidDefenseCard(card, table, trumpSuit) {
-                    if (!isValidCard(card) || !table || table.length === 0) return false;
-                    const lastAttack = table.find(pair => pair.attack && !pair.defense);
-                    if (!lastAttack || !isValidCard(lastAttack.attack)) return false;
-                    const isValid = (card.suit === lastAttack.attack.suit &&
-                                    rankOrder.indexOf(card.rank) > rankOrder.indexOf(lastAttack.attack.rank)) ||
-                                   (trumpSuit && card.suit === trumpSuit);
-                    console.log('game.html: Validating defense card:', JSON.stringify({
-                        card, lastAttack: lastAttack.attack, trumpSuit, isValid
-                    }));
-                    return isValid;
-                }
-
-                function updateDebugInfo(state, lastClick = null) {
-                    const clickableCards = playerHandEl.querySelectorAll('.card.clickable').length;
-                    const handRect = playerHandEl.getBoundingClientRect();
-                    const clickInfo = lastClick ? `Last Click: ${lastClick.element} at (${lastClick.x}, ${lastClick.y})` : 'No clicks';
-                    debugInfoEl.textContent = `Room: ${roomId}, Player: ${playerName}, ID: ${playerId || 'N/A'}, Attacker: ${state?.currentAttacker || 'N/A'}, Clickable Cards: ${clickableCards}, Hand: (${handRect.left}, ${handRect.top}, ${handRect.width}x${handRect.height}), ${clickInfo}`;
-                    console.log('game.html: Debug info:', JSON.stringify({
-                        roomId, playerName, playerId, currentAttacker: state?.currentAttacker, clickableCards,
-                        handRect: { left: handRect.left, top: handRect.top, width: handRect.width, height: handRect.height },
-                        lastClick
-                    }));
-                }
-
-                function showError(msg) {
-                    errorMessageEl.textContent = msg;
-                    setTimeout(() => errorMessageEl.textContent = '', 3000);
-                }
-
-                function handleCardClick(cardEl, e) {
-                    console.log('game.html: Card clicked:', JSON.stringify({
-                        rank: cardEl.dataset.rank,
-                        suit: cardEl.dataset.suit,
-                        role: cardEl.dataset.role,
-                        classes: cardEl.className,
-                        eventType: e.type
-                    }));
-
-                    if (cardEl.classList.contains('disabled')) {
-                        console.warn('game.html: Card click blocked:', JSON.stringify({
-                            card: cardEl.dataset,
-                            disabled: true
-                        }));
-                        showError('Not your turn');
-                        return;
-                    }
-
-                    const rank = cardEl.dataset.rank;
-                    const suit = cardEl.dataset.suit;
-                    const role = cardEl.dataset.role;
-
-                    if (!rank || !suit || !role) {
-                        console.warn('game.html: Invalid card data:', JSON.stringify({ rank, suit, role }));
-                        showError('Invalid card');
-                        return;
-                    }
-
-                    if (role === 'attack') {
-                        pendingAttackCard = { rank, suit };
-                    } else if (role === 'defend') {
-                        pendingDefenseCard = { rank, suit };
-                    }
-
-                    console.log('game.html: Playing card:', JSON.stringify({ rank, suit, role, playerId }));
-                    socket.emit('playCard', { roomId, playerName, playerId, card: { rank, suit }, role });
-
-                    updateGameUI(JSON.parse(JSON.stringify(window.lastGameState || {})));
-                }
-
-                function updateGameUI(data) {
-                    console.log('game.html: Updating UI with:', JSON.stringify({
-                        playerCount: data.players?.length,
-                        trump: data.trump,
-                        deckCount: data.deckCount,
-                        tableSize: data.table?.length,
-                        currentAttacker: data.currentAttacker,
-                        playerHand: data.players?.find(p => p.name === playerName)?.hand?.length
-                    }));
-
-                    if (!data || !data.players || data.players.length < 2) {
-                        console.error('game.html: Invalid game data:', JSON.stringify(data));
-                        showError('Invalid game data');
-                        setTimeout(() => window.location.href = '/', 2000);
-                        return;
-                    }
-
-                    const player = data.players.find(p => p.name === playerName);
-                    const opponents = data.players.filter(p => p.id !== player?.id);
-                    const currentAttacker = data.currentAttacker;
-                    const currentDefender = data.currentDefender;
-                    const table = data.table || [];
-                    const deckCount = data.deckCount || 0;
-                    const trump = data.trump;
-
-                    if (!player) {
-                        console.error('game.html: Player not found:', JSON.stringify(data.players));
-                        showError('Player not found');
-                        setTimeout(() => window.location.href = '/', 2000);
-                        return;
-                    }
-
-                    playerNameEl.textContent = `${player.name} (${player.id === currentAttacker ? 'Attacker' : player.id === currentDefender ? 'Defender' : 'Player'})`;
-                    playerNameEl.classList.toggle('highlight', player.id === currentAttacker || player.id === currentDefender);
-
-                    const playerHand = Array.isArray(player.hand) ? playerHand.filter(isValidCard) : [];
-                    console.log('game.html: Player hand:', JSON.stringify(playerHand));
-
-                    playerHandEl.innerHTML = playerHand.map(card => {
-                        const isAttacker = player.id === currentAttacker;
-                        const isDefender = player.id === currentDefender;
-                        const isValidMove = isAttacker ? isValidAttackCard(card, table) : isDefender ? isValidDefenseCard(card, table, trump?.suit) : false;
-                        const clickable = isValidMove && !isTakingCards && !player.isDisconnected;
-                        const isPending = (isAttacker && pendingAttackCard && pendingAttackCard.rank === card.rank && pendingAttackCard.suit === card.suit) ||
-                                         (isDefender && pendingDefenseCard && pendingDefenseCard.rank === card.rank && pendingDefenseCard.suit === card.suit);
-                        console.log('game.html: Rendering card:', JSON.stringify({
-                            card, isAttacker, isDefender, isValidMove, clickable, isPending, isDisconnected: player.isDisconnected, isTakingCards
-                        }));
-                        return renderCard(card, clickable, isAttacker ? 'attack' : isDefender ? 'defend' : null, isPending);
-                    }).join('');
-
-                    console.log('game.html: Attaching card listeners');
-                    const cardEls = playerHandEl.querySelectorAll('.card');
-                    console.log('game.html: Found cards:', cardEls.length);
-                    cardEls.forEach(cardEl => {
-                        cardEl.removeEventListener('click', cardEl._clickHandler);
-                        cardEl.removeEventListener('touchstart', cardEl._touchHandler);
-                        const handler = (e) => handleCardClick(cardEl, e);
-                        cardEl._clickHandler = handler;
-                        cardEl._touchHandler = handler;
-                        cardEl.addEventListener('click', handler);
-                        cardEl.addEventListener('touchstart', handler, { passive: true });
-                    });
-
-                    console.log('game.html: Player hand DOM:', playerHandEl.innerHTML);
-
-                    opponentsContainer.innerHTML = opponents.map((opponent, index) => {
-                        const opponentHand = Array.isArray(opponent.hand) ? opponent.hand : [];
-                        return `
-                            <div class="opponent-area">
-                                <h2 class="${opponent.id === currentAttacker || opponent.id === currentDefender ? 'highlight' : ''}">
-                                    ${opponent.name} (${opponent.id === currentAttacker ? 'Attacker' : opponent.id === currentDefender ? 'Defender' : 'Player'})
-                                </h2>
-                                <div class="hand">
-                                    ${opponentHand.length > 0 ? opponentHand.map(() => renderCardBack()).join('') : renderCardBack()}
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-
-                    tableEl.innerHTML = table.map((pair, index) => {
-                        if (!pair.attack || !isValidCard(pair.attack)) return '';
-                        let defenseCardHtml = pair.defense && isValidCard(pair.defense) ? renderCard(pair.defense, false, 'defense-card') : '';
-                        if (pendingDefenseCard && index === table.length - 1 && !pair.defense) {
-                            defenseCardHtml = renderCard(pendingDefenseCard, false, 'defense-card', true);
+            function fetchRoomState() {
+                console.log('room.html: Fetching room state for:', roomId);
+                fetch(`/room/${roomId}`)
+                    .then(response => {
+                        if (!response.ok) throw new Error('Room fetch failed');
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('room.html: HTTP fetch received:', data);
+                        if (data.error) {
+                            showError(data.error === 'Room not found' ? 'Room not found.' : 'An error occurred.');
+                            if (isJoined && data.error === 'Room not found') {
+                                setTimeout(fetchRoomState, 2000);
+                            } else {
+                                setTimeout(() => {
+                                    localStorage.clear();
+                                    window.location.href = '/';
+                                }, 5000);
+                            }
+                            return;
                         }
-                        const isPendingAttack = pendingAttackCard && pendingAttackCard.rank === pair.attack.rank && pendingAttackCard.suit === pair.attack.suit;
-                        return `
-                            <div class="card-pair">
-                                ${renderCard(pair.attack, false, null, isPendingAttack)}
-                                ${defenseCardHtml}
-                            </div>
-                        `;
-                    }).join('');
-
-                    deckEl.innerHTML = renderDeck(deckCount);
-                    deckCountEl.textContent = `Deck: ${deckCount}`;
-                    trumpCardEl.innerHTML = trump && isValidCard(trump.card) ? renderCard(trump.card, false) : '';
-                    if (trump && isValidCard(trump.card)) {
-                        console.log('game.html: Trump card rendered:', JSON.stringify(trump.card));
-                    }
-
-                    const hasUnbeatenCards = table.some(pair => pair.attack && !pair.defense);
-                    endTurnBtn.style.display = currentDefender === player.id && !hasUnbeatenCards ? 'inline-block' : 'none';
-                    takeCardsBtn.style.display = currentDefender === player.id && hasUnbeatenCards ? 'inline-block' : 'none';
-                    testPlayCardBtn.style.display = currentAttacker === player.id ? 'inline-block' : 'none';
-                    takeCardsBtn.disabled = isTakingCards;
-
-                    updateDebugInfo(data);
-                }
-
-                // Fallback click listeners
-                window.addEventListener('click', (e) => {
-                    const element = document.elementFromPoint(e.clientX, e.clientY);
-                    const elementInfo = element ? `${element.tagName}.${element.className || ''}#${element.id || ''}` : 'unknown';
-                    console.log('game.html: Window clicked:', JSON.stringify({
-                        x: e.clientX,
-                        y: e.clientY,
-                        element: elementInfo,
-                        target: e.target.className,
-                        tag: e.target.tagName,
-                        id: e.target.id
-                    }));
-                    updateDebugInfo(window.lastGameState || {}, { x: e.clientX, y: e.clientY, element: elementInfo });
-                });
-
-                document.body.addEventListener('click', (e) => {
-                    const element = document.elementFromPoint(e.clientX, e.clientY);
-                    const elementInfo = element ? `${element.tagName}.${element.className || ''}#${element.id || ''}` : 'unknown';
-                    console.log('game.html: Body clicked:', JSON.stringify({
-                        x: e.clientX,
-                        y: e.clientY,
-                        element: elementInfo,
-                        target: e.target.className,
-                        tag: e.target.tagName,
-                        id: e.target.id
-                    }));
-                });
-
-                socket.on('connect', () => {
-                    console.log('game.html: Socket connected:', socket.id);
-                    socket.emit('joinRoom', { roomId, playerName, playerId });
-                });
-
-                socket.on('roomJoined', ({ roomId, playerId: newPlayerId }) => {
-                    console.log('game.html: Room joined:', JSON.stringify({ roomId, playerId: newPlayerId }));
-                    playerId = newPlayerId;
-                    localStorage.setItem('playerId', playerId);
-                });
-
-                socket.on('updateGame', (data) => {
-                    console.log('game.html: Received updateGame:', JSON.stringify(data));
-                    window.lastGameState = data;
-                    pendingAttackCard = null;
-                    pendingDefenseCard = null;
-                    isTakingCards = false;
-                    updateGameUI(data);
-                });
-
-                socket.on('errorMessage', (msg) => {
-                    console.log('game.html: Error:', msg);
-                    showError(msg);
-                    pendingAttackCard = null;
-                    pendingDefenseCard = null;
-                    isTakingCards = false;
-                    updateGameUI(window.lastGameState || {});
-                });
-
-                endTurnBtn.addEventListener('click', () => {
-                    console.log('game.html: Ending turn:', JSON.stringify({ playerId, playerName }));
-                    socket.emit('endTurn', { roomId, playerId, playerName });
-                });
-
-                takeCardsBtn.addEventListener('click', () => {
-                    if (isTakingCards) return;
-                    console.log('game.html: Taking cards:', JSON.stringify({ playerId, playerName }));
-                    isTakingCards = true;
-                    takeCardsBtn.disabled = true;
-                    socket.emit('takeCards', { roomId, playerId, playerName });
-                    setTimeout(() => {
-                        isTakingCards = false;
-                        takeCardsBtn.disabled = false;
-                    }, 5000);
-                });
-
-                testPlayCardBtn.addEventListener('click', () => {
-                    console.log('game.html: Test play card:', JSON.stringify({ playerId, playerName }));
-                    socket.emit('playCard', {
-                        roomId,
-                        playerName,
-                        playerId,
-                        card: { rank: '7', suit: 'Diamonds' },
-                        role: 'attack'
+                        playerList.innerHTML = data.players && data.players.length ? data.players.map(player => 
+                            `<li class="${player.ready ? 'ready' : ''}">${player.name}${player.isDisconnected ? ` (${t('disconnected')})` : ''}</li>`
+                        ).join('') : '<li>No players</li>';
+                        playerCount.textContent = `${data.readyCount || 0}/${data.totalCount || 0}`;
+                        const currentPlayer = data.players && data.players.find(p => p.name === playerName);
+                        console.log('room.html: Current player check:', { playerName, currentPlayer });
+                        if (currentPlayer) {
+                            updateReadyButton(currentPlayer.ready, currentPlayer.isDisconnected);
+                            restrictReadyButtonUpdate(currentPlayer.ready, currentPlayer.isDisconnected, currentPlayer.playerId);
+                            logReadyButtonState(currentPlayer.ready, currentPlayer.isDisconnected, currentPlayer.playerId);
+                            isJoined = true;
+                            localStorage.setItem('isJoined', 'true');
+                        } else {
+                            updateReadyButton(false, true);
+                            restrictReadyButtonUpdate(false, true, null);
+                            logReadyButtonState(false, true, null);
+                            showError('Player not found in room.');
+                        }
+                        if (data.trump) {
+                            console.log('room.html: Game started, redirecting to game.html');
+                            window.location.href = `/game?room=${roomId}`;
+                        }
+                    })
+                    .catch(err => {
+                        console.error('room.html: Fetch error:', err);
+                        showError('Failed to fetch room state.');
                     });
-                });
+            }
 
-                console.log('game.html: Attaching initial listeners');
-                socket.emit('joinRoom', { roomId, playerName, playerId });
+            readyBtn.addEventListener('click', () => {
+                console.log('room.html: Ready button clicked', { roomId, playerId });
+                socket.emit('ready', { roomId, playerId });
+                readyBtn.disabled = true;
+                readyBtn.textContent = t('readyWaiting');
+                logReadyButtonState(true, false, playerId);
             });
-        } catch (error) {
-            console.error('game.html: Script error:', error.message, error.stack);
-            document.getElementById('errorMessage').textContent = 'Script error: Check console';
-        }
+
+            leaveRoomBtn.addEventListener('click', () => {
+                console.log('room.html: Leave room clicked', { roomId, playerId, playerName });
+                socket.emit('leaveRoom', { roomId, playerId, playerName });
+                localStorage.clear();
+                window.location.href = '/';
+            });
+
+            chatInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && chatInput.value.trim()) {
+                    const message = chatInput.value.trim();
+                    console.log('room.html: Sending chat message:', message);
+                    socket.emit('chatMessage', { roomId, playerName, message });
+                    chatInput.value = '';
+                }
+            });
+
+            function generateUUID() {
+                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+                    return v.toString(16);
+                });
+            }
+
+            socket.on('connect', () => {
+                console.log('room.html: Socket connected:', socket.id);
+                joinAttemptCount = 0;
+                socket.emit('reconnectPlayer', { roomId, playerId, playerName });
+                if (!isJoined) attemptJoinRoom();
+                fetchRoomState();
+                readyBtn.disabled = false;
+                errorMessage.textContent = '';
+            });
+
+            socket.on('connect_error', (err) => {
+                console.error('room.html: Socket connection error:', err.message);
+                showError('Failed to connect to server. Please check if the server is running.');
+                readyBtn.disabled = true;
+            });
+
+            socket.on('disconnect', () => {
+                console.log('room.html: Socket disconnected');
+                showError('Disconnected from server.');
+                readyBtn.disabled = true;
+            });
+
+            socket.on('updateRoom', ({ players, readyCount, totalCount }) => {
+                console.log('room.html: Received updateRoom:', { players, readyCount, totalCount });
+                playerList.innerHTML = players && players.length ? players.map(player => 
+                    `<li class="${player.ready ? 'ready' : ''}">${player.name}${player.isDisconnected ? ` (${t('disconnected')})` : ''}</li>`
+                ).join('') : '<li>No players</li>';
+                playerCount.textContent = `${readyCount || 0}/${totalCount || 0}`;
+            });
+
+            socket.on('startGame', ({ trump, trumpCard, currentAttacker, currentDefender }) => {
+                console.log('room.html: Received startGame:', { trump, trumpCard, currentAttacker, currentDefender });
+                window.location.href = `/game?room=${roomId}`;
+            });
+
+            socket.on('errorMessage', msg => {
+                console.log('room.html: Error:', msg);
+                showError(msg === 'Room does not exist.' ? 'Room not found.' : 
+                          msg === 'Player not found.' ? 'Player not found.' : 
+                          msg === 'Room is full.' ? 'Room is full.' : 'An error occurred.');
+                if (msg === 'Room does not exist.' || msg === 'Player not found.') {
+                    localStorage.clear();
+                    setTimeout(() => window.location.href = '/', 2000);
+                }
+            });
+
+            socket.on('setPlayerId', (newPlayerId) => {
+                console.log('room.html: Received setPlayerId:', newPlayerId);
+                playerId = newPlayerId;
+                localStorage.setItem('playerId', newPlayerId);
+            });
+
+            socket.on('roomJoined', ({ roomId, playerId: newPlayerId, language: serverLanguage, playerName: serverPlayerName }) => {
+                console.log('room.html: Room joined:', { roomId, newPlayerId, serverLanguage, serverPlayerName });
+                playerId = newPlayerId;
+                playerName = serverPlayerName || playerName;
+                language = serverLanguage;
+                localStorage.setItem('playerId', newPlayerId);
+                localStorage.setItem('playerName', playerName);
+                localStorage.setItem('language', language);
+                isJoined = true;
+                localStorage.setItem('isJoined', 'true');
+                joinAttemptCount = 0;
+                updateUIText();
+                fetchRoomState();
+            });
+
+            socket.on('playerReconnected', ({ playerName }) => {
+                console.log('room.html: Player reconnected:', playerName);
+                fetchRoomState();
+            });
+
+            socket.on('playerStatus', ({ playerId: updatedPlayerId, ready, isDisconnected }) => {
+                console.log('room.html: Received playerStatus:', { updatedPlayerId, ready, isDisconnected });
+                if (updatedPlayerId === playerId) {
+                    updateReadyButton(ready, isDisconnected);
+                    restrictReadyButtonUpdate(ready, isDisconnected, updatedPlayerId);
+                    logReadyButtonState(ready, isDisconnected, updatedPlayerId);
+                }
+            });
+
+            socket.on('chatMessage', ({ playerName, message }) => {
+                console.log('room.html: Chat message received:', { playerName, message });
+                if (chatBox) {
+                    const messageEl = document.createElement('div');
+                    messageEl.textContent = `${playerName}: ${message}`;
+                    chatBox.appendChild(messageEl);
+                    chatBox.scrollTop = chatBox.scrollHeight;
+                }
+            });
+
+            // Initial state fetch
+            fetchRoomState();
+
+            function updateReadyButton(isReady, isDisconnected) {
+                const readyBtn = document.getElementById('readyBtn');
+                readyBtn.disabled = isReady || isDisconnected;
+                readyBtn.textContent = isReady ? t('readyWaiting') : t('readyBtn');
+                console.log(`room.html: Updated ready button: disabled=${readyBtn.disabled}, text=${readyBtn.textContent}`);
+            }
+
+            function startAutoRefresh() {
+                const refreshInterval = setInterval(() => {
+                    console.log('room.html: Triggering auto-refresh');
+                    fetchRoomState();
+                }, 500);
+                window.addEventListener('beforeunload', () => {
+                    clearInterval(refreshInterval);
+                });
+            }
+
+            function restrictReadyButtonUpdate(isReady, isDisconnected, targetPlayerId) {
+                if (targetPlayerId !== playerId) {
+                    console.log(`room.html: Skipping ready button update for playerId=${targetPlayerId}, current playerId=${playerId}`);
+                    return;
+                }
+                const readyBtn = document.getElementById('readyBtn');
+                readyBtn.disabled = isReady || isDisconnected;
+                readyBtn.textContent = isReady ? t('readyWaiting') : t('readyBtn');
+                console.log(`room.html: Restricted ready button update: disabled=${readyBtn.disabled}, text=${readyBtn.textContent}, playerId=${targetPlayerId}`);
+            }
+
+            function logReadyButtonState(isReady, isDisconnected, targetPlayerId) {
+                const readyBtn = document.getElementById('readyBtn');
+                console.log(`room.html: Ready button state: disabled=${readyBtn.disabled}, text=${readyBtn.textContent}, isReady=${isReady}, isDisconnected=${isDisconnected}, targetPlayerId=${targetPlayerId}, currentPlayerId=${playerId}`);
+            }
+
+            // Start auto-refresh
+            startAutoRefresh();
+        });
     </script>
 </body>
 </html>
