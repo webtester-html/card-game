@@ -5,7 +5,7 @@ const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
-const sqlite3 = require('sqlite3');
+const { Client } = require('pg');
 
 // Initialize Express and HTTP server
 const app = express();
@@ -21,34 +21,34 @@ const io = socketIo(server, {
 const PORT = process.env.PORT || 3000;
 const dbPath = process.env.DATABASE_URL || 'postgresql://durak_game_db_user:sYBK7oZf8Iwe8ueNDboivwEk9KbJAERh@dpg-d0bs2tuuk2gs7383n0o0-a/durak_game_db';
 
-// Check database file permissions
 function checkDatabasePermissions() {
     try {
-        if (fs.existsSync(dbPath)) {
-            fs.accessSync(dbPath, fs.constants.F_OK | fs.constants.W_OK);
-            console.log('Database file is accessible and writable');
-            fs.stat(dbPath, (err, stats) => {
-                if (err) console.error('Error getting database file stats:', err.message);
-                else console.log('Database file stats:', stats);
-            });
-        } else {
-            console.log('Database file does not exist, will be created automatically');
-        }
+        console.log('Using remote PostgreSQL database');
+        console.log('Database URL:', dbUrl);
     } catch (err) {
-        console.error('Error checking database file:', err.message);
+        console.error('Error with database config:', err.message);
         process.exit(1);
     }
 }
 checkDatabasePermissions();
 
-// Initialize SQLite database
-const db = new sqlite3.Database(dbPath, (err) => {
-    if (err) {
-        console.error('Error connecting to database:', err.message);
-        process.exit(1);
+// Підключення до PostgreSQL
+const client = new Client({
+    connectionString: dbUrl,
+    ssl: {
+        rejectUnauthorized: false // для Render
     }
-    console.log('Connected to SQLite database');
 });
+
+client.connect()
+    .then(() => {
+        console.log('Connected to PostgreSQL database');
+        // Тут можна запускати сервер
+    })
+    .catch((err) => {
+        console.error('Error connecting to PostgreSQL:', err.message);
+        process.exit(1);
+    });
 
 // Create database schema
 function initDatabase() {
