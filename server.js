@@ -1539,7 +1539,6 @@ socket.on('disconnect', async () => {
         const { roomId, playerId, name } = player;
         console.log(`Player ${name} disconnected from room ${roomId}, playerId: ${playerId}, socket=${socket.id}`);
 
-        // Await removeSocketId (which is async) and handle errors directly
         await new Promise((resolve, reject) => {
             removeSocketId(playerId, socket.id, (err) => {
                 if (err) {
@@ -1551,7 +1550,6 @@ socket.on('disconnect', async () => {
             });
         });
 
-        // Check remaining socketIds
         const socketRes = await client.query(
             'SELECT socketIds FROM players WHERE roomId = $1 AND playerId = $2',
             [roomId, playerId]
@@ -1584,6 +1582,7 @@ socket.on('disconnect', async () => {
     } catch (err) {
         console.error('Error handling disconnect:', err.message);
     }
+});
 });
 
 // Periodic database cleanup
@@ -1630,8 +1629,17 @@ process.on('SIGTERM', async () => {
     }
 });
 
-// Start server
-server.listen(PORT, async () => {
-    console.log(`Server running on port ${PORT}`);
-    await initDatabase();
-});
+async function startServer() {
+    try {
+        await initDatabase();
+        console.log('Database initialized successfully');
+        server.listen(PORT, () => {
+            console.log(`Server running on port ${PORT}`);
+        });
+    } catch (err) {
+        console.error('Failed to initialize database:', err.message);
+        process.exit(1);
+    }
+}
+
+startServer();
