@@ -27,15 +27,15 @@
             align-items: center;
             padding: 20px;
             box-sizing: border-box;
-            pointer-events: none; /* Prevent clicks on container */
+            pointer-events: none;
         }
         .player-area {
             width: 100%;
             text-align: center;
             position: absolute;
             bottom: 20px;
-            z-index: 100; /* High z-index to ensure clicks reach */
-            pointer-events: auto; /* Allow clicks */
+            z-index: 100;
+            pointer-events: auto;
         }
         .opponents-container {
             width: 100%;
@@ -46,7 +46,7 @@
             top: 20px;
             gap: 20px;
             z-index: 20;
-            pointer-events: none; /* Prevent clicks */
+            pointer-events: none;
         }
         .opponent-area {
             text-align: center;
@@ -129,7 +129,7 @@
             box-sizing: border-box;
             position: relative;
             z-index: 25;
-            pointer-events: none; /* Prevent clicks */
+            pointer-events: none;
         }
         .card-pair {
             display: flex;
@@ -142,8 +142,7 @@
             justify-content: center;
             gap: 10px;
             flex-wrap: wrap;
-            border: 2px solid red; /* Debug: highlight #playerHand */
-            pointer-events: auto; /* Allow clicks */
+            pointer-events: auto;
         }
         .opponent-area .hand {
             pointer-events: none;
@@ -167,8 +166,8 @@
             cursor: pointer;
             transition: transform 0.2s, border 0.2s;
             color: red;
-            pointer-events: auto; /* Ensure clicks */
-            z-index: 101; /* High z-index */
+            pointer-events: auto;
+            z-index: 101;
         }
         .card.clickable {
             border: 2px solid green;
@@ -298,20 +297,23 @@
             const takeCardsBtn = document.getElementById('takeCardsBtn');
             const errorMessageEl = document.getElementById('errorMessage');
             const debugInfoEl = document.getElementById('debugInfo');
+            let roomId = '';
+            let playerId = '';
+            let playerName = '';
             let pendingAttackCard = null;
             let pendingDefenseCard = null;
             let isTakingCards = false;
 
-            const urlParams = new URLSearchParams(window.location.search);
-            const roomId = urlParams.get('room');
-            let playerName = localStorage.getItem('playerName');
-            let playerId = localStorage.getItem('playerId');
+            // Initialize from localStorage
+            roomId = localStorage.getItem('roomId') || new URLSearchParams(window.location.search).get('room') || '';
+            playerId = localStorage.getItem('playerId') || '';
+            playerName = localStorage.getItem('playerName') || '';
 
-            console.log('game.html: Initial data:', JSON.stringify({ roomId, playerName, playerId }));
+            console.log('game.html: Initial data:', { roomId, playerId, playerName });
 
-            if (!roomId || !playerName) {
-                console.error('game.html: Missing roomId or playerName');
-                errorMessageEl.textContent = 'Invalid room or player';
+            if (!roomId || !playerId || !playerName) {
+                console.error('game.html: Missing roomId, playerId, or playerName');
+                errorMessageEl.textContent = 'Missing room or player information';
                 setTimeout(() => window.location.href = '/', 2000);
                 return;
             }
@@ -325,7 +327,7 @@
 
             const rankDisplay = {
                 '6': '6', '7': '7', '8': '8', '9': '9', '10': '10',
-                'Jack': 'В', 'Queen': 'Д', 'King': 'К', 'Ace': 'Т'
+                'Jack': 'J', 'Queen': 'Q', 'King': 'K', 'Ace': 'A'
             };
 
             const rankOrder = ['6', '7', '8', '9', '10', 'Jack', 'Queen', 'King', 'Ace'];
@@ -337,7 +339,7 @@
 
             function renderCard(card, clickable = false, role = null, isPending = false) {
                 if (!isValidCard(card)) {
-                    console.warn('game.html: Invalid card:', JSON.stringify(card));
+                    console.warn('game.html: Invalid card:', card);
                     return '';
                 }
                 const suitClass = card.suit.toLowerCase();
@@ -345,9 +347,6 @@
                 const pendingClass = isPending ? 'pending' : '';
                 const clickableClass = clickable ? 'clickable' : '';
                 const displayRank = rankDisplay[card.rank] || card.rank;
-                console.log('game.html: Rendering card:', JSON.stringify({
-                    card, clickable, role, isPending, isDisabled: !!isDisabled
-                }));
                 return `
                     <div class="card ${suitClass} ${isDisabled} ${pendingClass} ${clickableClass}"
                          data-rank="${card.rank}" data-suit="${card.suit}" ${role ? `data-role="${role}"` : ''}>
@@ -378,44 +377,24 @@
             }
 
             function isValidAttackCard(card, table) {
-                if (!isValidCard(card)) {
-                    console.warn('game.html: Invalid attack card:', JSON.stringify(card));
-                    return false;
-                }
-                if (!table || table.length === 0) {
-                    console.log('game.html: Table empty, any card is valid for attack');
-                    return true;
-                }
-                const isValid = table.some(pair => pair.attack && pair.attack.rank === card.rank);
-                console.log('game.html: Validating attack card:', JSON.stringify({
-                    card, tableRanks: table.map(p => p.attack?.rank), isValid
-                }));
-                return isValid;
+                if (!isValidCard(card)) return false;
+                if (!table || table.length === 0) return true;
+                return table.some(pair => pair.attack && pair.attack.rank === card.rank);
             }
 
             function isValidDefenseCard(card, table, trumpSuit) {
                 if (!isValidCard(card) || !table || table.length === 0) return false;
                 const lastAttack = table.find(pair => pair.attack && !pair.defense);
                 if (!lastAttack || !isValidCard(lastAttack.attack)) return false;
-                const isValid = (card.suit === lastAttack.attack.suit &&
-                                rankOrder.indexOf(card.rank) > rankOrder.indexOf(lastAttack.attack.rank)) ||
-                               (trumpSuit && card.suit === trumpSuit);
-                console.log('game.html: Validating defense card:', JSON.stringify({
-                    card, lastAttack: lastAttack.attack, trumpSuit, isValid
-                }));
-                return isValid;
+                return (card.suit === lastAttack.attack.suit &&
+                        rankOrder.indexOf(card.rank) > rankOrder.indexOf(lastAttack.attack.rank)) ||
+                       (trumpSuit && card.suit === trumpSuit);
             }
 
-            function updateDebugInfo(state, lastClick = null) {
+            function updateDebugInfo(state) {
                 const clickableCards = playerHandEl.querySelectorAll('.card.clickable').length;
                 const handRect = playerHandEl.getBoundingClientRect();
-                const clickInfo = lastClick ? `Last Click: ${lastClick.element} at (${lastClick.x}, ${lastClick.y})` : 'No clicks';
-                debugInfoEl.textContent = `Room: ${roomId}, Player: ${playerName}, ID: ${playerId || 'N/A'}, Attacker: ${state?.currentAttacker || 'N/A'}, Clickable Cards: ${clickableCards}, Hand: (${handRect.left}, ${handRect.top}, ${handRect.width}x${handRect.height}), ${clickInfo}`;
-                console.log('game.html: Debug info:', JSON.stringify({
-                    roomId, playerName, playerId, currentAttacker: state?.currentAttacker, clickableCards,
-                    handRect: { left: handRect.left, top: handRect.top, width: handRect.width, height: handRect.height },
-                    lastClick
-                }));
+                debugInfoEl.textContent = `Room: ${roomId}, Player: ${playerName}, ID: ${playerId || 'N/A'}, Attacker: ${state?.currentAttacker || 'N/A'}, Defender: ${state?.currentDefender || 'N/A'}, Clickable Cards: ${clickableCards}, Hand: (${handRect.left}, ${handRect.top}, ${handRect.width}x${handRect.height})`;
             }
 
             function showError(msg) {
@@ -424,64 +403,34 @@
             }
 
             function handleCardClick(cardEl, e) {
-                console.log('game.html: Card clicked:', JSON.stringify({
-                    rank: cardEl.dataset.rank,
-                    suit: cardEl.dataset.suit,
-                    role: cardEl.dataset.role,
-                    classes: cardEl.className,
-                    eventType: e.type
-                }));
-
                 if (cardEl.classList.contains('disabled')) {
-                    console.warn('game.html: Card click blocked:', JSON.stringify({
-                        card: cardEl.dataset,
-                        disabled: true
-                    }));
                     showError('Not your turn');
                     return;
                 }
-
                 const rank = cardEl.dataset.rank;
                 const suit = cardEl.dataset.suit;
                 const role = cardEl.dataset.role;
-
                 if (!rank || !suit || !role) {
-                    console.warn('game.html: Invalid card data:', JSON.stringify({ rank, suit, role }));
                     showError('Invalid card');
                     return;
                 }
-
                 if (role === 'attack') {
                     pendingAttackCard = { rank, suit };
                 } else if (role === 'defend') {
                     pendingDefenseCard = { rank, suit };
                 }
-
-                console.log('game.html: Playing card:', JSON.stringify({ rank, suit, role, playerId }));
                 socket.emit('playCard', { roomId, playerName, playerId, card: { rank, suit }, role });
-
-                updateGameUI(JSON.parse(JSON.stringify(window.lastGameState || {})));
             }
 
             function updateGameUI(data) {
-                console.log('game.html: Updating UI with:', JSON.stringify({
-                    playerCount: data.players?.length,
-                    trump: data.trump,
-                    deckCount: data.deckCount,
-                    tableSize: data.table?.length,
-                    currentAttacker: data.currentAttacker,
-                    playerHand: data.players?.find(p => p.name === playerName)?.hand?.length
-                }));
-
                 if (!data || !data.players || data.players.length < 2) {
-                    console.error('game.html: Invalid game data:', JSON.stringify(data));
+                    console.error('game.html: Invalid game data:', data);
                     showError('Invalid game data');
-                    setTimeout(() => window.location.href = '/', 2000);
                     return;
                 }
 
-                const player = data.players.find(p => p.name === playerName);
-                const opponents = data.players.filter(p => p.id !== player?.id);
+                const player = data.players.find(p => p.id === playerId);
+                const opponent = data.players.find(p => p.id !== playerId && !p.isDisconnected);
                 const currentAttacker = data.currentAttacker;
                 const currentDefender = data.currentDefender;
                 const table = data.table || [];
@@ -489,7 +438,6 @@
                 const trump = data.trump;
 
                 if (!player) {
-                    console.error('game.html: Player not found:', JSON.stringify(data.players));
                     showError('Player not found');
                     setTimeout(() => window.location.href = '/', 2000);
                     return;
@@ -499,8 +447,6 @@
                 playerNameEl.classList.toggle('highlight', player.id === currentAttacker || player.id === currentDefender);
 
                 const playerHand = Array.isArray(player.hand) ? player.hand.filter(isValidCard) : [];
-                console.log('game.html: Player hand:', JSON.stringify(playerHand));
-
                 playerHandEl.innerHTML = playerHand.map(card => {
                     const isAttacker = player.id === currentAttacker;
                     const isDefender = player.id === currentDefender;
@@ -508,13 +454,9 @@
                     const clickable = isValidMove && !isTakingCards && !player.isDisconnected;
                     const isPending = (isAttacker && pendingAttackCard && pendingAttackCard.rank === card.rank && pendingAttackCard.suit === card.suit) ||
                                      (isDefender && pendingDefenseCard && pendingDefenseCard.rank === card.rank && pendingDefenseCard.suit === card.suit);
-                    console.log('game.html: Rendering card:', JSON.stringify({
-                        card, isAttacker, isDefender, isValidMove, clickable, isPending, isDisconnected: player.isDisconnected, isTakingCards
-                    }));
                     return renderCard(card, clickable, isAttacker ? 'attack' : isDefender ? 'defend' : null, isPending);
                 }).join('');
 
-                // Attach click listeners to cards
                 const cardEls = playerHandEl.querySelectorAll('.card');
                 cardEls.forEach(cardEl => {
                     cardEl.removeEventListener('click', cardEl._clickHandler);
@@ -526,21 +468,16 @@
                     cardEl.addEventListener('touchstart', handler, { passive: true });
                 });
 
-                console.log('game.html: Player hand DOM:', playerHandEl.innerHTML);
-
-                opponentsContainer.innerHTML = opponents.map((opponent, index) => {
-                    const opponentHand = Array.isArray(opponent.hand) ? opponent.hand : [];
-                    return `
-                        <div class="opponent-area">
-                            <h2 class="${opponent.id === currentAttacker || opponent.id === currentDefender ? 'highlight' : ''}">
-                                ${opponent.name} (${opponent.id === currentAttacker ? 'Attacker' : opponent.id === currentDefender ? 'Defender' : 'Player'})
-                            </h2>
-                            <div class="hand">
-                                ${opponentHand.length > 0 ? opponentHand.map(() => renderCardBack()).join('') : renderCardBack()}
-                            </div>
+                opponentsContainer.innerHTML = opponent ? `
+                    <div class="opponent-area">
+                        <h2 class="${opponent.id === currentAttacker || opponent.id === currentDefender ? 'highlight' : ''}">
+                            ${opponent.name} (${opponent.id === currentAttacker ? 'Attacker' : opponent.id === currentDefender ? 'Defender' : 'Player'})
+                        </h2>
+                        <div class="hand">
+                            ${opponent.hand && opponent.hand.length > 0 ? opponent.hand.map(() => renderCardBack()).join('') : renderCardBack()}
                         </div>
-                    `;
-                }).join('');
+                    </div>
+                ` : '';
 
                 tableEl.innerHTML = table.map((pair, index) => {
                     if (!pair.attack || !isValidCard(pair.attack)) return '';
@@ -560,51 +497,39 @@
                 deckEl.innerHTML = renderDeck(deckCount);
                 deckCountEl.textContent = `Deck: ${deckCount}`;
                 trumpCardEl.innerHTML = trump && isValidCard(trump.card) ? renderCard(trump.card, false) : '';
-                if (trump && isValidCard(trump.card)) {
-                    console.log('game.html: Trump card rendered:', JSON.stringify(trump.card));
-                }
-
-                const hasUnbeatenCards = table.some(pair => pair.attack && !pair.defense);
-                endTurnBtn.style.display = currentDefender === player.id && !hasUnbeatenCards ? 'inline-block' : 'none';
-                takeCardsBtn.style.display = currentDefender === player.id && hasUnbeatenCards ? 'inline-block' : 'none';
-                takeCardsBtn.disabled = isTakingCards;
 
                 updateDebugInfo(data);
             }
 
-            // Global click listener for debugging
-            document.addEventListener('click', (e) => {
-                const element = document.elementFromPoint(e.clientX, e.clientY);
-                const elementInfo = element ? `${element.tagName}.${element.className || ''}#${element.id || ''}` : 'unknown';
-                console.log('game.html: Document clicked:', JSON.stringify({
-                    x: e.clientX,
-                    y: e.clientY,
-                    element: elementInfo,
-                    target: e.target.className,
-                    tag: e.target.tagName,
-                    id: e.target.id
-                }));
-                updateDebugInfo(window.lastGameState || {}, { x: e.clientX, y: e.clientY, element: elementInfo });
-            });
-
             socket.on('connect', () => {
                 console.log('game.html: Socket connected:', socket.id);
                 socket.emit('joinRoom', { roomId, playerName, playerId });
+                socket.emit('reconnectPlayer', { roomId, playerId, playerName });
             });
 
-            socket.on('roomJoined', ({ roomId, playerId: newPlayerId }) => {
-                console.log('game.html: Room joined:', JSON.stringify({ roomId, playerId: newPlayerId }));
+            socket.on('roomJoined', ({ roomId: joinedRoomId, playerId: newPlayerId, playerName: joinedPlayerName }) => {
+                roomId = joinedRoomId;
                 playerId = newPlayerId;
+                playerName = joinedPlayerName;
+                localStorage.setItem('roomId', roomId);
                 localStorage.setItem('playerId', playerId);
+                localStorage.setItem('playerName', playerName);
+                console.log('game.html: Room joined:', { roomId, playerId, playerName });
             });
 
             socket.on('updateGame', (data) => {
-                console.log('game.html: Received updateGame:', JSON.stringify(data));
+                console.log('game.html: Received updateGame:', data);
                 window.lastGameState = data;
                 pendingAttackCard = null;
                 pendingDefenseCard = null;
                 isTakingCards = false;
                 updateGameUI(data);
+            });
+
+            socket.on('buttonState', ({ showEndTurn, showTakeCards, isDefender }) => {
+                endTurnBtn.style.display = isDefender && showEndTurn ? 'inline-block' : 'none';
+                takeCardsBtn.style.display = isDefender && showTakeCards ? 'inline-block' : 'none';
+                takeCardsBtn.disabled = isTakingCards;
             });
 
             socket.on('errorMessage', (msg) => {
@@ -616,24 +541,44 @@
                 updateGameUI(window.lastGameState || {});
             });
 
+            socket.on('gameOver', ({ winners }) => {
+                showError(`Game Over! Winner: ${winners.join(', ')}`);
+                setTimeout(() => window.location.href = '/', 5000);
+            });
+
+            socket.on('playerReconnected', ({ playerName }) => {
+                showError(`${playerName} reconnected`);
+            });
+
+            socket.on('roomDeleted', (msg) => {
+                showError(msg);
+                setTimeout(() => window.location.href = '/', 3000);
+            });
+
             endTurnBtn.addEventListener('click', () => {
-                console.log('game.html: Ending turn:', JSON.stringify({ playerId, playerName }));
+                console.log('game.html: Ending turn:', { playerId, playerName });
                 socket.emit('endTurn', { roomId, playerId, playerName });
             });
 
             takeCardsBtn.addEventListener('click', () => {
                 if (isTakingCards) return;
-                console.log('game.html: Taking cards:', JSON.stringify({ playerId, playerName }));
+                console.log('game.html: Taking cards:', { playerId, playerName });
                 isTakingCards = true;
                 takeCardsBtn.disabled = true;
                 socket.emit('takeCards', { roomId, playerId, playerName });
                 setTimeout(() => {
                     isTakingCards = false;
                     takeCardsBtn.disabled = false;
-                }, 5000);
+                }, 2000);
             });
 
+            window.addEventListener('beforeunload', () => {
+                socket.emit('tempDisconnect', { roomId, playerId, playerName });
+            });
+
+            // Initial join
             socket.emit('joinRoom', { roomId, playerName, playerId });
+            socket.emit('reconnectPlayer', { roomId, playerId, playerName });
         });
     </script>
 </body>
