@@ -374,7 +374,7 @@ function findLowestTrumpCard(players, trump) {
 // Start turn timer
 function startTurnTimer(roomId) {
     clearTurnTimer(roomId);
-    const timer = set-moment(() => {
+    const timer = setTimeout(() => { // Исправлено с set-moment на setTimeout
         (async () => {
             try {
                 const roomRes = await client.query(
