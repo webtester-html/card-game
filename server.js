@@ -400,7 +400,11 @@ function startTurnTimer(roomId) {
                     return;
                 }
                 const playerIds = players.map(p => p.playerId);
-                const currentIndex = playerIds.indexOf(row.currentDefender);
+                let currentIndex = playerIds.indexOf(row.currentDefender);
+                if (currentIndex === -1) {
+                    console.warn(`Current defender ${row.currentDefender} not found in room ${roomId}, selecting random attacker`);
+                    currentIndex = Math.floor(Math.random() * playerIds.length);
+                }
                 const nextAttackerIndex = (currentIndex + 1) % playerIds.length;
                 const nextDefenderIndex = (nextAttackerIndex + 1) % playerIds.length;
                 const newAttacker = playerIds[nextAttackerIndex];
@@ -605,8 +609,15 @@ async function startGame(roomId) {
         } else {
             console.log(`No trump cards found in room ${roomId}, selecting random attacker`);
             const activePlayerIds = activePlayers.map(p => p.playerId);
-            currentAttacker = activePlayerIds[0];
-            currentDefender = activePlayerIds[1];
+            if (activePlayerIds.length < 2) {
+                console.error(`Not enough players to start game in room ${roomId}: ${activePlayerIds.length}`);
+                io.to(roomId).emit('errorMessage', 'Not enough players to start game.');
+                return; // Прервать выполнение функции
+            }
+            const randomIndex = Math.floor(Math.random() * activePlayerIds.length);
+            currentAttacker = activePlayerIds[randomIndex];
+            currentDefender = activePlayerIds[(randomIndex + 1) % activePlayerIds.length];
+            console.log(`Random attacker assigned: ${currentAttacker}, defender: ${currentDefender}`);
         }
 
         await client.query(
@@ -1527,62 +1538,62 @@ io.on('connection', (socket) => {
         }
     });
 
-socket.on('disconnect', async () => {
-    console.log(`User disconnected: socket=${socket.id}`);
-    try {
-        const playerRes = await client.query(
-            'SELECT roomId, playerId, name FROM players WHERE id = $1',
-            [socket.id]
-        );
-        const player = playerRes.rows[0];
-        if (!player) return;
-        const { roomId, playerId, name } = player;
-        console.log(`Player ${name} disconnected from room ${roomId}, playerId: ${playerId}, socket=${socket.id}`);
+    socket.on('disconnect', async () => {
+        console.log(`User disconnected: socket=${socket.id}`);
+        try {
+            const playerRes = await client.query(
+                'SELECT roomId, playerId, name FROM players WHERE id = $1',
+                [socket.id]
+            );
+            const player = playerRes.rows[0];
+            if (!player) return;
+            const { roomId, playerId, name } = player;
+            console.log(`Player ${name} disconnected from room ${roomId}, playerId: ${playerId}, socket=${socket.id}`);
 
-        await new Promise((resolve, reject) => {
-            removeSocketId(playerId, socket.id, (err) => {
-                if (err) {
-                    console.error('Error removing socketId:', err.message);
-                    reject(err);
-                } else {
-                    resolve();
-                }
+            await new Promise((resolve, reject) => {
+                removeSocketId(playerId, socket.id, (err) => {
+                    if (err) {
+                        console.error('Error removing socketId:', err.message);
+                        reject(err);
+                    } else {
+                        resolve();
+                    }
+                });
             });
-        });
 
-        const socketRes = await client.query(
-            'SELECT socketIds FROM players WHERE roomId = $1 AND playerId = $2',
-            [roomId, playerId]
-        );
-        const socketIds = socketRes.rows[0] && socketRes.rows[0].socketIds ? JSON.parse(socketRes.rows[0].socketIds) : [];
+            const socketRes = await client.query(
+                'SELECT socketIds FROM players WHERE roomId = $1 AND playerId = $2',
+                [roomId, playerId]
+            );
+            const socketIds = socketRes.rows[0] && socketRes.rows[0].socketIds ? JSON.parse(socketRes.rows[0].socketIds) : [];
 
-        if (socketIds.length === 0) {
-            await client.query(
-                'UPDATE players SET isDisconnected = 1, lastDisconnectedAt = $1 WHERE roomId = $2 AND playerId = $3',
-                [Date.now(), roomId, playerId]
-            );
-            console.log(`Player ${name} marked as disconnected in room ${roomId}`);
-            const gameRes = await client.query(
-                'SELECT trump FROM rooms WHERE roomId = $1',
-                [roomId]
-            );
-            if (gameRes.rows[0] && gameRes.rows[0].trump) {
-                await updateGameState(roomId);
-                await handleSinglePlayerGame(roomId);
+            if (socketIds.length === 0) {
+                await client.query(
+                    'UPDATE players SET isDisconnected = 1, lastDisconnectedAt = $1 WHERE roomId = $2 AND playerId = $3',
+                    [Date.now(), roomId, playerId]
+                );
+                console.log(`Player ${name} marked as disconnected in room ${roomId}`);
+                const gameRes = await client.query(
+                    'SELECT trump FROM rooms WHERE roomId = $1',
+                    [roomId]
+                );
+                if (gameRes.rows[0] && gameRes.rows[0].trump) {
+                    await updateGameState(roomId);
+                    await handleSinglePlayerGame(roomId);
+                } else {
+                    await updateRoomState(roomId);
+                }
+                await client.query(
+                    'UPDATE rooms SET lastActivity = $1 WHERE roomId = $2',
+                    [Date.now(), roomId]
+                );
             } else {
                 await updateRoomState(roomId);
             }
-            await client.query(
-                'UPDATE rooms SET lastActivity = $1 WHERE roomId = $2',
-                [Date.now(), roomId]
-            );
-        } else {
-            await updateRoomState(roomId);
+        } catch (err) {
+            console.error('Error handling disconnect:', err.message);
         }
-    } catch (err) {
-        console.error('Error handling disconnect:', err.message);
-    }
-});
+    });
 });
 
 // Periodic database cleanup
