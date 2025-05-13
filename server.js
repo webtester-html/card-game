@@ -347,26 +347,21 @@ function shuffleDeck(deck) {
 }
 
 // Find lowest trump card for first attacker
-function findLowestTrumpCard(players, trump) {
-    const rankOrder = ['6', '7', '8', '9', '10', 'Jack', 'Queen', 'King', 'Ace'];
+function findLowestTrumpCard(players, trumpSuit) {
     let lowestTrumpCard = null;
     let firstAttacker = null;
 
-    players.forEach(player => {
-        const hand = player.hand ? JSON.parse(player.hand) : [];
-        const trumpCards = hand.filter(card => card.suit === trump);
-        if (trumpCards.length > 0) {
-            const lowestCard = trumpCards.reduce((min, card) => {
-                const minRankIndex = rankOrder.indexOf(min.rank);
-                const cardRankIndex = rankOrder.indexOf(card.rank);
-                return cardRankIndex < minRankIndex ? card : min;
-            }, trumpCards[0]);
-            if (!lowestTrumpCard || rankOrder.indexOf(lowestCard.rank) < rankOrder.indexOf(lowestTrumpCard.rank)) {
-                lowestTrumpCard = lowestCard;
-                firstAttacker = player.playerId;
+    for (const player of players) {
+        const hand = JSON.parse(player.hand);
+        for (const card of hand) {
+            if (card.suit === trumpSuit) {
+                if (!lowestTrumpCard || compareCards(card, lowestTrumpCard, trumpSuit) < 0) {
+                    lowestTrumpCard = card;
+                    firstAttacker = player.playerId;
+                }
             }
         }
-    });
+    }
 
     return { lowestTrumpCard, firstAttacker };
 }
@@ -400,6 +395,11 @@ function startTurnTimer(roomId) {
                     return;
                 }
                 const playerIds = players.map(p => p.playerId);
+                if (playerIds.length < 2) {
+                    console.error(`Not enough players to continue game in room ${roomId}: ${playerIds.length} players`);
+                    io.to(roomId).emit('errorMessage', 'Not enough players to continue game.');
+                    return;
+                }
                 let currentIndex = playerIds.indexOf(row.currentDefender);
                 if (currentIndex === -1) {
                     console.warn(`Current defender ${row.currentDefender} not found in room ${roomId}, selecting random attacker`);
@@ -408,7 +408,8 @@ function startTurnTimer(roomId) {
                 const nextAttackerIndex = (currentIndex + 1) % playerIds.length;
                 const nextDefenderIndex = (nextAttackerIndex + 1) % playerIds.length;
                 const newAttacker = playerIds[nextAttackerIndex];
-                const newDefender = playerIds[nextDefenderIndex] || playerIds[0];
+                const newDefender = playerIds[nextDefenderIndex];
+                console.log(`New roles assigned in room ${roomId}: attacker=${newAttacker}, defender=${newDefender}`);
                 await client.query(
                     'UPDATE rooms SET gameTable = $1, currentAttacker = $2, currentDefender = $3, lastActivity = $4 WHERE roomId = $5',
                     [JSON.stringify([]), newAttacker, newDefender, Date.now(), roomId]
@@ -610,14 +611,14 @@ async function startGame(roomId) {
             console.log(`No trump cards found in room ${roomId}, selecting random attacker`);
             const activePlayerIds = activePlayers.map(p => p.playerId);
             if (activePlayerIds.length < 2) {
-                console.error(`Not enough players to start game in room ${roomId}: ${activePlayerIds.length}`);
+                console.error(`Not enough players to start game in room ${roomId}: ${activePlayerIds.length} players`);
                 io.to(roomId).emit('errorMessage', 'Not enough players to start game.');
                 return; // Прервать выполнение функции
             }
             const randomIndex = Math.floor(Math.random() * activePlayerIds.length);
             currentAttacker = activePlayerIds[randomIndex];
             currentDefender = activePlayerIds[(randomIndex + 1) % activePlayerIds.length];
-            console.log(`Random attacker assigned: ${currentAttacker}, defender: ${currentDefender}`);
+            console.log(`Random attacker assigned in room ${roomId}: attacker=${currentAttacker}, defender=${currentDefender}`);
         }
 
         await client.query(
